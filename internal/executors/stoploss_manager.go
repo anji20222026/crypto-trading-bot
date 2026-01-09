@@ -804,14 +804,13 @@ func (sm *StopLossManager) CheckStopLossOrderStatus(ctx context.Context, symbol 
 		return nil // No position or no stop-loss order
 	}
 
-	// Query algo order status from Binance
-	// 从币安查询 Algo 订单状态
-	// IMPORTANT: Since we now use Algo Order API, we must query using NewGetAlgoOrderService
-	// 重要：由于现在使用 Algo Order API，必须使用 NewGetAlgoOrderService 查询
-	// Note: Algo Order API only needs AlgoID, not symbol
-	// 注意：Algo Order API 只需要 AlgoID，不需要 symbol
-	algoOrder, err := sm.executor.client.NewGetAlgoOrderService().
-		AlgoID(parseInt64(pos.StopLossOrderID)).
+	binanceSymbol := normalizedSymbol
+
+	// Query order status from Binance
+	// 从币安查询订单状态
+	order, err := sm.executor.client.NewGetOrderService().
+		Symbol(binanceSymbol).
+		OrderID(parseInt64(pos.StopLossOrderID)).
 		Do(ctx)
 
 	if err != nil {
@@ -827,7 +826,7 @@ func (sm *StopLossManager) CheckStopLossOrderStatus(ctx context.Context, symbol 
 			strings.Contains(errMsg, "-2011") // Binance error code for unknown order
 
 		if isOrderNotFound {
-			sm.logger.Warning(fmt.Sprintf("🔔【%s】止损单已不存在（可能已执行），Algo ID: %s", symbol, pos.StopLossOrderID))
+			sm.logger.Warning(fmt.Sprintf("🔔【%s】止损单已不存在（可能已执行），订单ID: %s", symbol, pos.StopLossOrderID))
 			// Trigger reconciliation to clean up
 			// 触发对账以清理持仓
 			return sm.ReconcilePosition(ctx, symbol)
@@ -835,19 +834,15 @@ func (sm *StopLossManager) CheckStopLossOrderStatus(ctx context.Context, symbol 
 		return fmt.Errorf("查询止损单状态失败: %w", err)
 	}
 
-	// Check if algo order is triggered and filled
-	// 检查 Algo 订单是否已触发并成交
-	// AlgoStatus can be: "NEW", "WORKING", "CANCELED", "TRIGGERED", "FILLED"
-	// AlgoStatus 可能值："NEW"、"WORKING"、"CANCELED"、"TRIGGERED"、"FILLED"
-	// When triggered, ActualOrderId will be set to the actual market order ID
-	// 触发后，ActualOrderId 会被设置为实际市价单的订单 ID
-	if algoOrder.AlgoStatus == "FILLED" || algoOrder.ActualOrderId != "" {
-		sm.logger.Warning(fmt.Sprintf("🔔【%s】止损单已成交，Algo ID: %s, 状态: %s",
-			symbol, pos.StopLossOrderID, algoOrder.AlgoStatus))
+	// Check if order is filled
+	// 检查订单是否已成交
+	if order.Status == futures.OrderStatusTypeFilled {
+		sm.logger.Warning(fmt.Sprintf("🔔【%s】止损单已成交，订单ID: %s, 状态: %s",
+			symbol, pos.StopLossOrderID, order.Status))
 
-		// Get executed price from algo order
-		// 从 Algo 订单获取成交价格
-		closePrice, err := parseFloat(algoOrder.ActualPrice)
+		// Get executed price from order
+		// 从订单获取成交价格
+		closePrice, err := parseFloat(order.AvgPrice)
 		if err != nil || closePrice == 0 {
 			sm.logger.Warning(fmt.Sprintf("⚠️  无法解析成交价格，使用止损价: %.2f", pos.CurrentStopLoss))
 			closePrice = pos.CurrentStopLoss
@@ -864,13 +859,13 @@ func (sm *StopLossManager) CheckStopLossOrderStatus(ctx context.Context, symbol 
 
 		// Close position
 		// 关闭持仓
-		reason := fmt.Sprintf("止损单成交（Algo ID: %s）", pos.StopLossOrderID)
+		reason := fmt.Sprintf("止损单成交（订单ID: %s）", pos.StopLossOrderID)
 		return sm.ClosePosition(ctx, symbol, closePrice, reason, realizedPnL)
 	}
 
-	// Algo order still active
-	// Algo 订单仍活跃
-	sm.logger.Info(fmt.Sprintf("✓【%s】止损单状态正常: %s", symbol, algoOrder.AlgoStatus))
+	// Order still active
+	// 订单仍活跃
+	sm.logger.Info(fmt.Sprintf("✓【%s】止损单状态正常: %s", symbol, order.Status))
 	return nil
 }
 
@@ -946,23 +941,13 @@ func (sm *StopLossManager) placeStopLossOrder(ctx context.Context, pos *Position
 
 	binanceSymbol := sm.config.GetBinanceSymbolFor(pos.Symbol)
 
-	// Create stop-loss order using Algo Order API
-	// 使用 Algo Order API 创建止损单
-	// CRITICAL FIX (error -4120): All conditional orders (STOP, STOP_MARKET, TAKE_PROFIT, etc.)
-	// must use the NEW Algo Order API endpoint: POST /fapi/v1/algoOrder
-	// 关键修复（错误 -4120）：所有条件订单（STOP、STOP_MARKET、TAKE_PROFIT 等）
-	// 必须使用新的 Algo Order API 端点：POST /fapi/v1/algoOrder
-	//
-	// API Changes:
-	// - Old endpoint: POST /fapi/v1/order (NO LONGER supports conditional orders)
-	// - New endpoint: POST /fapi/v1/algoOrder (REQUIRED for all conditional orders)
-	// - Use TriggerPrice instead of StopPrice
-	// - Use AlgoOrderTypeStopMarket instead of OrderTypeStopMarket
-	order, err := sm.executor.client.NewCreateAlgoOrderService().
+	// Create stop-loss order
+	// 创建止损单
+	order, err := sm.executor.client.NewCreateOrderService().
 		Symbol(binanceSymbol).
 		Side(orderSide).
-		Type(futures.AlgoOrderTypeStopMarket).        // Use Algo Order Type
-		TriggerPrice(fmt.Sprintf("%.2f", stopPrice)). // Use TriggerPrice instead of StopPrice
+		Type(futures.OrderTypeStopMarket).
+		StopPrice(fmt.Sprintf("%.2f", stopPrice)).
 		Quantity(fmt.Sprintf("%.4f", pos.Quantity)).
 		ReduceOnly(true). // 只平仓不开仓 / Close only
 		Do(ctx)
@@ -971,12 +956,12 @@ func (sm *StopLossManager) placeStopLossOrder(ctx context.Context, pos *Position
 		return fmt.Errorf("下止损单失败: %w", err)
 	}
 
-	pos.StopLossOrderID = fmt.Sprintf("%d", order.AlgoId)
+	pos.StopLossOrderID = fmt.Sprintf("%d", order.OrderID)
 	modeLabel := ""
 	if sm.executor.testMode {
 		modeLabel = "🧪 [测试网] "
 	}
-	sm.logger.Success(fmt.Sprintf("%s【%s】止损单已下达(Algo): 触发价=%.2f (Algo ID: %s, 当前价: %.2f)",
+	sm.logger.Success(fmt.Sprintf("%s【%s】止损单已下达: %.2f (订单ID: %s, 当前价: %.2f)",
 		modeLabel, pos.Symbol, stopPrice, pos.StopLossOrderID, currentPrice))
 
 	return nil
@@ -989,31 +974,32 @@ func (sm *StopLossManager) cancelStopLossOrder(ctx context.Context, pos *Positio
 		return nil
 	}
 
+	// Normalize symbol to Binance format
+	// 统一符号格式为币安格式
+	binanceSymbol := sm.config.GetBinanceSymbolFor(pos.Symbol)
+
 	// Log cancellation attempt
 	// 记录取消尝试
 	modeLabel := ""
 	if sm.executor.testMode {
 		modeLabel = "🧪 [测试网] "
 	}
-	sm.logger.Info(fmt.Sprintf("%s【%s】正在取消止损单: Algo ID=%s",
-		modeLabel, pos.Symbol, pos.StopLossOrderID))
+	sm.logger.Info(fmt.Sprintf("%s【%s】正在取消止损单: OrderID=%s, Symbol=%s",
+		modeLabel, pos.Symbol, pos.StopLossOrderID, binanceSymbol))
 
-	// IMPORTANT: Use Algo Order API to cancel algo orders
-	// 重要：使用 Algo Order API 取消 Algo 订单
-	// Note: CancelAlgoOrderService only needs AlgoID, not symbol
-	// 注意：CancelAlgoOrderService 只需要 AlgoID，不需要 symbol
-	_, err := sm.executor.client.NewCancelAlgoOrderService().
-		AlgoID(parseInt64(pos.StopLossOrderID)).
+	_, err := sm.executor.client.NewCancelOrderService().
+		Symbol(binanceSymbol).
+		OrderID(parseInt64(pos.StopLossOrderID)).
 		Do(ctx)
 
 	if err != nil {
 		// Provide detailed error context
 		// 提供详细的错误上下文
-		return fmt.Errorf("取消止损单失败 (Algo ID=%s): %w",
-			pos.StopLossOrderID, err)
+		return fmt.Errorf("取消止损单失败 (Symbol=%s, OrderID=%s): %w",
+			binanceSymbol, pos.StopLossOrderID, err)
 	}
 
-	sm.logger.Success(fmt.Sprintf("%s【%s】旧止损单已取消(Algo): %s", modeLabel, pos.Symbol, pos.StopLossOrderID))
+	sm.logger.Success(fmt.Sprintf("%s【%s】旧止损单已取消: %s", modeLabel, pos.Symbol, pos.StopLossOrderID))
 	pos.StopLossOrderID = ""
 
 	return nil
