@@ -31,6 +31,8 @@ type SymbolReports struct {
 	OHLCVData                 []dataflows.OHLCV
 	TechnicalIndicators       *dataflows.TechnicalIndicators // 主时间周期的技术指标 / Primary timeframe indicators
 	LongerTechnicalIndicators *dataflows.TechnicalIndicators // 长期时间周期的技术指标 / Longer timeframe indicators
+	LongerOHLCVData           []dataflows.OHLCV              // 长期时间周期的 OHLCV 数据 / Longer timeframe OHLCV data
+	MarketJSONData            *dataflows.SymbolMarketData    // 结构化市场数据 / Structured market data for LLM
 }
 
 // TradeDecision represents a structured trading decision from LLM (for JSON Schema output)
@@ -352,12 +354,13 @@ func (g *SimpleTradingGraph) BuildGraph(ctx context.Context) (compose.Runnable[m
 				// Multi-timeframe analysis (if enabled)
 				// 多时间周期分析（如果启用）
 				var longerIndicators *dataflows.TechnicalIndicators
+				var longerOHLCV []dataflows.OHLCV
 				if g.config.EnableMultiTimeframe {
 					g.logger.Info(fmt.Sprintf("  🔄 正在获取 %s 更长期时间周期数据 (%s)...", sym, g.config.CryptoLongerTimeframe))
 
 					// Fetch OHLCV data for longer timeframe
 					// 获取更长期时间周期的 OHLCV 数据
-					longerOHLCV, err := marketData.GetOHLCV(ctx, binanceSymbol, g.config.CryptoLongerTimeframe, g.config.CryptoLongerLookbackDays)
+					longerOHLCV, err = marketData.GetOHLCV(ctx, binanceSymbol, g.config.CryptoLongerTimeframe, g.config.CryptoLongerLookbackDays)
 					if err != nil {
 						g.logger.Warning(fmt.Sprintf("  ⚠️  %s 更长期时间周期数据获取失败: %v", sym, err))
 					} else {
@@ -391,12 +394,33 @@ func (g *SimpleTradingGraph) BuildGraph(ctx context.Context) (compose.Runnable[m
 					}
 				}
 
+				// Build structured JSON data for LLM
+				// 为 LLM 构建结构化 JSON 数据
+				g.logger.Info(fmt.Sprintf("  🔧 正在构建 %s 结构化市场数据...", sym))
+				jsonData, err := dataflows.BuildMarketJSONData(
+					ctx,
+					marketData,
+					binanceSymbol,
+					timeframe,
+					ohlcvData,
+					indicators,
+					longerIndicators,
+					longerOHLCV,
+				)
+				if err != nil {
+					g.logger.Warning(fmt.Sprintf("  ⚠️  %s 结构化数据构建失败: %v", sym, err))
+				} else {
+					g.logger.Success(fmt.Sprintf("  ✅ %s 结构化数据构建完成", sym))
+				}
+
 				// Save to state (thread-safe)
 				mu.Lock()
 				if reports := g.state.Reports[sym]; reports != nil {
 					reports.OHLCVData = ohlcvData
 					reports.TechnicalIndicators = indicators
 					reports.LongerTechnicalIndicators = longerIndicators // 保存长期时间周期指标 / Save longer timeframe indicators
+					reports.LongerOHLCVData = longerOHLCV                // 保存长期时间周期 OHLCV 数据 / Save longer timeframe OHLCV data
+					reports.MarketJSONData = jsonData                    // 保存结构化市场数据 / Save structured market data
 				}
 				mu.Unlock()
 
@@ -871,52 +895,37 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 		return g.makeSimpleDecision(), nil
 	}
 
-	// Prepare the prompt with all reports
-	// 准备包含所有报告的 Prompt
-	allReports := g.state.GetAllReports()
-
-	// Load system prompt from file or use default
-	// 从文件加载系统 Prompt 或使用默认值
-	systemPrompt := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
-
-	// Build user prompt with leverage range info and K-line interval
-	// 构建包含杠杆范围信息和 K 线间隔的用户 Prompt
-	leverageInfo := ""
-	if g.config.BinanceLeverageDynamic {
-		leverageInfo = fmt.Sprintf(`
-**动态杠杆范围**: %d-%d 倍
-`, g.config.BinanceLeverageMin, g.config.BinanceLeverageMax)
-	} else {
-		leverageInfo = fmt.Sprintf(`
-**固定杠杆**: %d 倍（本次交易将使用固定杠杆）
-`, g.config.BinanceLeverage)
+	// Build structured JSON data for all symbols with schema
+	// 为所有交易对构建结构化 JSON 数据（包含 schema）
+	marketJSONData := &dataflows.MarketJSONData{
+		Schema: dataflows.GetDefaultSchema(),
+		Data:   make(map[string]*dataflows.SymbolMarketData),
 	}
 
-	// Add K-line interval info
-	// 添加 K 线间隔信息
-	klineInfo := fmt.Sprintf(`
-**K 线数据间隔**: %s（市场报告中的技术指标基于此时间周期计算）
-**系统运行间隔**: %s（系统每隔此时间运行一次分析）
-`, g.config.CryptoTimeframe, g.config.TradingInterval)
+	g.state.mu.RLock()
+	for _, symbol := range g.state.Symbols {
+		if reports := g.state.Reports[symbol]; reports != nil && reports.MarketJSONData != nil {
+			marketJSONData.Data[symbol] = reports.MarketJSONData
+		}
+	}
+	g.state.mu.RUnlock()
 
-	// Calculate trading session context
-	// 计算交易会话上下文信息
-	minutesSinceStart := int(time.Since(g.startTime).Minutes())
-	currentTime := time.Now().Format("2006-01-02 15:04:05")
-	tradeCount := g.GetTradeCount()
+	// Convert JSON data to string
+	// 将 JSON 数据转换为字符串
+	jsonBytes, err := sonic.MarshalIndent(marketJSONData, "", "  ")
+	if err != nil {
+		g.logger.Warning(fmt.Sprintf("JSON 序列化失败: %v，使用简单规则决策", err))
+		return g.makeSimpleDecision(), nil
+	}
+	marketDataJSON := string(jsonBytes)
 
-	// Build session context info
-	// 构建会话上下文信息
-	sessionContext := fmt.Sprintf(`
-- 这是你开始交易的第 %d 分钟,目前的时间是：%s,你已经参与了交易 %d 次，
-`, minutesSinceStart, currentTime, tradeCount)
+	// Load system prompt from file (trader_json_no_trailing_stop.txt)
+	// 从文件加载系统 Prompt（trader_json_no_trailing_stop.txt）
+	systemPrompt := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
 
-	userPrompt := fmt.Sprintf(`%s下方我们将为您提供各种市场技术分析、加密货币状态分析，助您发掘超额收益。再下方是您当前的当前持仓信息，包括价值、业绩和持仓情况。请分析以下各种数据并给出交易决策：
-%s
-%s
-%s
-
-请给出你的分析和最终决策。`, sessionContext, leverageInfo, klineInfo, allReports)
+	// User prompt is just the market data JSON
+	// 用户 Prompt 就是市场数据 JSON
+	userPrompt := marketDataJSON
 
 	// Create messages
 	// 创建消息
@@ -925,19 +934,50 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 		schema.UserMessage(userPrompt),
 	}
 
-	// Call LLM
-	// 调用 LLM
+	// Log request details
+	// 记录请求详情
 	modeStr := "JSON Schema"
 	if useJSONObjectMode {
 		modeStr = "JSON Object"
 	}
-	g.logger.Info(fmt.Sprintf("🤖 正在调用 LLM 生成交易决策 (%s 模式), 使用的模型:%v", modeStr, g.config.QuickThinkLLM))
+	g.logger.Header(fmt.Sprintf("📤 发送 LLM 请求 (%s 模式)", modeStr), '-', 80)
+	g.logger.Info(fmt.Sprintf("模型: %s", g.config.QuickThinkLLM))
+	g.logger.Info(fmt.Sprintf("后端: %s", g.config.BackendURL))
+	g.logger.Info(fmt.Sprintf("系统提示词长度: %d 字符", len(systemPrompt)))
+	g.logger.Info(fmt.Sprintf("用户数据长度: %d 字符", len(userPrompt)))
+
+	// Log system prompt (first 500 chars)
+	// 记录系统提示词（前 500 字符）
+	systemPreview := systemPrompt
+	if len(systemPreview) > 500 {
+		systemPreview = systemPreview[:500] + "..."
+	}
+	g.logger.Info(fmt.Sprintf("系统提示词预览:\n%s", systemPreview))
+
+	// Log user data (market JSON) - show structure
+	// 记录用户数据（市场 JSON）- 显示结构
+	g.logger.Info(fmt.Sprintf("市场数据 JSON 预览:\n%s", userPrompt[:min(len(userPrompt), 1000)]+"..."))
+
+	// Count symbols in market data
+	// 统计市场数据中的交易对数量
+	symbolCount := len(marketJSONData.Data)
+	g.logger.Info(fmt.Sprintf("包含交易对数量: %d", symbolCount))
+	for symbol := range marketJSONData.Data {
+		g.logger.Info(fmt.Sprintf("  - %s", symbol))
+	}
+
+	// Call LLM
+	// 调用 LLM
+	g.logger.Info("🚀 正在调用 LLM...")
 	response, err := chatModel.Generate(ctx, messages)
 	if err != nil {
 		g.logger.Warning(fmt.Sprintf("LLM 调用失败，使用简单规则决策: %v", err))
 		return g.makeSimpleDecision(), nil
 	}
 
+	// Log response details
+	// 记录响应详情
+	g.logger.Header("📥 接收 LLM 响应", '-', 80)
 	g.logger.Success("✅ LLM 决策生成完成")
 
 	// Log token usage if available
@@ -949,19 +989,35 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 			response.ResponseMeta.Usage.CompletionTokens))
 	}
 
+	// Log response content length
+	// 记录响应内容长度
+	g.logger.Info(fmt.Sprintf("响应内容长度: %d 字符", len(response.Content)))
+
+	// Log full response content
+	// 记录完整响应内容
+	g.logger.Info("完整响应内容:")
+	g.logger.Info(fmt.Sprintf("%s", response.Content))
+
 	// Parse JSON response (support both multi-symbol map and single-object formats)
 	// 解析 JSON 响应（支持多币种映射和单对象两种格式）
+	g.logger.Header("🔍 解析 LLM 响应", '-', 80)
+
 	var sample TradeDecision
 	parsed := false
 
 	cleanContent := extractJSONPayload(response.Content)
 	trimmed := strings.TrimSpace(cleanContent)
 
+	g.logger.Info(fmt.Sprintf("清理后的 JSON 长度: %d 字符", len(trimmed)))
+
 	// Try multi-symbol format: map[string]TradeDecision
 	// 优先尝试多币种格式：map[string]TradeDecision
 	var multi map[string]TradeDecision
 	if err := sonic.Unmarshal([]byte(trimmed), &multi); err == nil && len(multi) > 0 {
+		g.logger.Success(fmt.Sprintf("✅ 成功解析为多交易对格式，包含 %d 个交易对", len(multi)))
 		for sym, d := range multi {
+			g.logger.Info(fmt.Sprintf("  - %s: Action=%s, Confidence=%.2f, Leverage=%d",
+				sym, d.Action, d.Confidence, d.Leverage))
 			sample = d
 			// If symbol field is empty, use map key as fallback
 			// 如果结构体中未填 symbol，则使用 map 的键作为回退
@@ -974,15 +1030,19 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	} else {
 		// Fallback: single-object format
 		// 回退到单对象格式
+		g.logger.Info("尝试解析为单交易对格式...")
 		var single TradeDecision
 		if err := sonic.Unmarshal([]byte(trimmed), &single); err == nil {
+			g.logger.Success("✅ 成功解析为单交易对格式")
 			sample = single
 			parsed = true
+		} else {
+			g.logger.Warning(fmt.Sprintf("单交易对格式解析失败: %v", err))
 		}
 	}
 
 	if !parsed {
-		g.logger.Warning(fmt.Sprintf("JSON 解析失败，原始响应: %s", response.Content))
+		g.logger.Warning(fmt.Sprintf("❌ JSON 解析失败，原始响应: %s", response.Content))
 		g.logger.Warning("降级到简单规则决策")
 		return g.makeSimpleDecision(), nil
 	}
@@ -990,14 +1050,30 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	// Validate required fields on sample decision
 	// 对示例决策验证必填字段
 	if strings.TrimSpace(sample.Action) == "" || strings.TrimSpace(sample.Symbol) == "" {
-		g.logger.Warning(fmt.Sprintf("LLM 返回的 JSON 缺少必填字段 (action或symbol为空)，示例: %+v", sample))
+		g.logger.Warning(fmt.Sprintf("❌ LLM 返回的 JSON 缺少必填字段 (action或symbol为空)，示例: %+v", sample))
+		g.logger.Warning(fmt.Sprintf("原始响应内容:\n%s", response.Content))
 		return g.makeSimpleDecision(), nil
 	}
 
 	// Log parsed decision info
 	// 记录解析后的示例决策信息
-	g.logger.Info(fmt.Sprintf("📊 示例决策: Symbol=%s, Action=%s, Confidence=%.2f, Leverage=%d",
-		sample.Symbol, sample.Action, sample.Confidence, sample.Leverage))
+	g.logger.Header("📊 决策结果", '-', 80)
+	g.logger.Info(fmt.Sprintf("交易对: %s", sample.Symbol))
+	g.logger.Info(fmt.Sprintf("操作: %s", sample.Action))
+	g.logger.Info(fmt.Sprintf("置信度: %.2f", sample.Confidence))
+	g.logger.Info(fmt.Sprintf("杠杆: %d", sample.Leverage))
+	if sample.StopLoss > 0 {
+		g.logger.Info(fmt.Sprintf("止损: %.2f", sample.StopLoss))
+	}
+	if sample.PositionSize > 0 {
+		g.logger.Info(fmt.Sprintf("仓位: %.2f%%", sample.PositionSize))
+	}
+	if sample.RiskRewardRatio > 0 {
+		g.logger.Info(fmt.Sprintf("盈亏比: %.2f", sample.RiskRewardRatio))
+	}
+	if sample.Reasoning != "" {
+		g.logger.Info(fmt.Sprintf("理由: %s", sample.Reasoning))
+	}
 
 	// Return both JSON and formatted text for backward compatibility
 	// 为了向后兼容，返回 JSON 原文（也可以格式化为文本）

@@ -1,0 +1,516 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oak/crypto-trading-bot/internal/dataflows/market-json-data",
+  "$ref": "#/$defs/MarketJSONData",
+  "$defs": {
+    "BBBands": {
+      "properties": {
+        "upper": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "lower": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "upper",
+        "lower"
+      ],
+      "type": "object"
+    },
+    "BBData": {
+      "properties": {
+        "15m": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BBBands",
+            "type": ""
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "15m"
+      ],
+      "type": "object"
+    },
+    "DailyStatsData": {
+      "properties": {
+        "price_change_percent": {
+          "type": "number"
+        },
+        "high": {
+          "type": "number"
+        },
+        "low": {
+          "type": "number"
+        },
+        "volume": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "price_change_percent",
+        "high",
+        "low",
+        "volume"
+      ],
+      "type": "object"
+    },
+    "IndicatorHistoryData": {
+      "properties": {
+        "15m": {
+          "$ref": "#/$defs/IndicatorSeriesData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "15m"
+      ],
+      "type": "object"
+    },
+    "IndicatorSeriesData": {
+      "properties": {
+        "EMA12": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "MACD": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "RSI7": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "RSI14": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "ADX": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "EMA12",
+        "MACD",
+        "RSI7",
+        "RSI14",
+        "ADX"
+      ],
+      "type": "object"
+    },
+    "IndicatorsData": {
+      "properties": {
+        "EMA": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "MACD": {
+          "type": "number"
+        },
+        "RSI": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "ADX": {
+          "type": "number"
+        },
+        "BB": {
+          "$ref": "#/$defs/BBData",
+          "type": ""
+        },
+        "ATR": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "VWAP": {
+          "$ref": "#/$defs/VWAPData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "EMA",
+        "MACD",
+        "RSI",
+        "ADX",
+        "BB",
+        "ATR",
+        "VWAP"
+      ],
+      "type": "object"
+    },
+    "LongTermData": {
+      "properties": {
+        "price_mid": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "EMA": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "ATR": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        "MACD": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "RSI14": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "price_mid",
+        "EMA",
+        "ATR",
+        "MACD",
+        "RSI14"
+      ],
+      "type": "object"
+    },
+    "MarketJSONData": {
+      "properties": {
+        "schema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SchemaField",
+            "type": ""
+          },
+          "type": "object"
+        },
+        "data": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SymbolMarketData",
+            "type": ""
+          },
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "data"
+      ],
+      "type": "object"
+    },
+    "MarketStatsData": {
+      "properties": {
+        "funding_rate": {
+          "type": "number"
+        },
+        "price_change_24h_pct": {
+          "type": "number"
+        },
+        "high_24h": {
+          "type": "number"
+        },
+        "low_24h": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "funding_rate",
+        "price_change_24h_pct",
+        "high_24h",
+        "low_24h"
+      ],
+      "type": "object"
+    },
+    "MultiTFIndicator": {
+      "properties": {
+        "EMA20": {
+          "type": "number"
+        },
+        "EMA50": {
+          "type": "number"
+        },
+        "MACD": {
+          "type": "number"
+        },
+        "RSI7": {
+          "type": "number"
+        },
+        "RSI14": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "EMA20",
+        "EMA50",
+        "MACD",
+        "RSI7",
+        "RSI14"
+      ],
+      "type": "object"
+    },
+    "OITimeframeData": {
+      "properties": {
+        "change_rate": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "volume": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "change_rate",
+        "volume"
+      ],
+      "type": "object"
+    },
+    "OpenInterestData": {
+      "properties": {
+        "15m": {
+          "$ref": "#/$defs/OITimeframeData",
+          "type": ""
+        },
+        "daily_stats": {
+          "$ref": "#/$defs/DailyStatsData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "15m",
+        "daily_stats"
+      ],
+      "type": "object"
+    },
+    "PositionsData": {
+      "properties": {
+        "open_interest": {
+          "$ref": "#/$defs/OpenInterestData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "open_interest"
+      ],
+      "type": "object"
+    },
+    "PriceHistoryData": {
+      "properties": {
+        "15m": {
+          "$ref": "#/$defs/PriceSeriesData",
+          "type": ""
+        },
+        "1h": {
+          "$ref": "#/$defs/PriceSeriesData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "15m",
+        "1h"
+      ],
+      "type": "object"
+    },
+    "PriceSeriesData": {
+      "properties": {
+        "mid": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mid"
+      ],
+      "type": "object"
+    },
+    "SchemaField": {
+      "properties": {
+        "type": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "description"
+      ],
+      "type": "object"
+    },
+    "SymbolMarketData": {
+      "properties": {
+        "current_price": {
+          "type": "number"
+        },
+        "timeframe": {
+          "type": "string"
+        },
+        "indicators": {
+          "$ref": "#/$defs/IndicatorsData",
+          "type": ""
+        },
+        "volume": {
+          "$ref": "#/$defs/VolumeData",
+          "type": ""
+        },
+        "price_history": {
+          "$ref": "#/$defs/PriceHistoryData",
+          "type": ""
+        },
+        "indicator_history": {
+          "$ref": "#/$defs/IndicatorHistoryData",
+          "type": ""
+        },
+        "multi_tf": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MultiTFIndicator",
+            "type": ""
+          },
+          "type": "object"
+        },
+        "market_stats": {
+          "$ref": "#/$defs/MarketStatsData",
+          "type": ""
+        },
+        "long_term_1h": {
+          "$ref": "#/$defs/LongTermData",
+          "type": ""
+        },
+        "positions": {
+          "$ref": "#/$defs/PositionsData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "current_price",
+        "timeframe",
+        "indicators",
+        "volume",
+        "price_history",
+        "indicator_history",
+        "multi_tf",
+        "market_stats",
+        "long_term_1h",
+        "positions"
+      ],
+      "type": "object"
+    },
+    "VWAPData": {
+      "properties": {
+        "24h": {
+          "type": "number"
+        },
+        "current_deviation": {
+          "type": "number"
+        },
+        "history_15m": {
+          "$ref": "#/$defs/VWAPHistoryData",
+          "type": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "24h",
+        "current_deviation",
+        "history_15m"
+      ],
+      "type": "object"
+    },
+    "VWAPHistoryData": {
+      "properties": {
+        "price": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "deviation_pct": {
+          "items": {
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "price",
+        "deviation_pct"
+      ],
+      "type": "object"
+    },
+    "VolumeData": {
+      "properties": {
+        "current": {
+          "type": "number"
+        },
+        "average": {
+          "type": "number"
+        },
+        "period": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "current",
+        "average",
+        "period"
+      ],
+      "type": "object"
+    }
+  },
+  "type": ""
+}

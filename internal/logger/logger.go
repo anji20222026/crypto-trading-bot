@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,30 +44,76 @@ const (
 	BgWhite   = "\033[47m"
 )
 
-// ColorLogger provides colored terminal output
+// ColorLogger provides colored terminal output and file logging
 type ColorLogger struct {
-	logger zerolog.Logger
-	writer io.Writer
+	logger      zerolog.Logger
+	writer      io.Writer
+	logFile     *os.File
+	llmLogDir   string
+	sessionTime string
 }
 
-// NewColorLogger creates a new ColorLogger instance
+// NewColorLogger creates a new ColorLogger instance with file logging
 func NewColorLogger(debug bool) *ColorLogger {
-	output := zerolog.ConsoleWriter{
+	// Create logs directory
+	logsDir := "./logs"
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		fmt.Printf("Failed to create logs directory: %v\n", err)
+	}
+
+	// Create session timestamp
+	sessionTime := time.Now().Format("2006-01-02_15-04-05")
+
+	// Create main log file
+	logFilePath := filepath.Join(logsDir, fmt.Sprintf("trading_%s.log", sessionTime))
+	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Printf("Failed to create log file: %v\n", err)
+		logFile = nil
+	}
+
+	// Create LLM logs directory
+	llmLogDir := filepath.Join(logsDir, fmt.Sprintf("llm_%s", sessionTime))
+	if err := os.MkdirAll(llmLogDir, 0755); err != nil {
+		fmt.Printf("Failed to create LLM log directory: %v\n", err)
+	}
+
+	// Setup console output
+	consoleOutput := zerolog.ConsoleWriter{
 		Out:        os.Stdout,
 		TimeFormat: time.RFC3339,
 		NoColor:    false,
 	}
+
+	// Setup multi-writer (console + file)
+	var writers []io.Writer
+	writers = append(writers, consoleOutput)
+	if logFile != nil {
+		fileOutput := zerolog.ConsoleWriter{
+			Out:        logFile,
+			TimeFormat: time.RFC3339,
+			NoColor:    true, // No color codes in file
+		}
+		writers = append(writers, fileOutput)
+	}
+	multiWriter := io.MultiWriter(writers...)
 
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	if debug {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
-	logger := zerolog.New(output).With().Timestamp().Logger()
+	logger := zerolog.New(multiWriter).With().Timestamp().Logger()
+
+	fmt.Printf("📁 日志文件: %s\n", logFilePath)
+	fmt.Printf("📁 LLM 日志目录: %s\n", llmLogDir)
 
 	return &ColorLogger{
-		logger: logger,
-		writer: os.Stdout,
+		logger:      logger,
+		writer:      os.Stdout,
+		logFile:     logFile,
+		llmLogDir:   llmLogDir,
+		sessionTime: sessionTime,
 	}
 }
 
@@ -189,10 +236,52 @@ func center(text string, width int) string {
 	return strings.Repeat(" ", padding) + text
 }
 
+// SaveLLMRequest saves LLM request data to file
+func (l *ColorLogger) SaveLLMRequest(requestData string, requestNum int) {
+	if l.llmLogDir == "" {
+		return
+	}
+
+	filename := filepath.Join(l.llmLogDir, fmt.Sprintf("request_%03d_%s.json", requestNum, time.Now().Format("15-04-05")))
+	if err := os.WriteFile(filename, []byte(requestData), 0644); err != nil {
+		l.Warning(fmt.Sprintf("Failed to save LLM request: %v", err))
+	} else {
+		l.Debug(fmt.Sprintf("LLM 请求已保存: %s", filename))
+	}
+}
+
+// SaveLLMResponse saves LLM response data to file
+func (l *ColorLogger) SaveLLMResponse(responseData string, requestNum int) {
+	if l.llmLogDir == "" {
+		return
+	}
+
+	filename := filepath.Join(l.llmLogDir, fmt.Sprintf("response_%03d_%s.json", requestNum, time.Now().Format("15-04-05")))
+	if err := os.WriteFile(filename, []byte(responseData), 0644); err != nil {
+		l.Warning(fmt.Sprintf("Failed to save LLM response: %v", err))
+	} else {
+		l.Debug(fmt.Sprintf("LLM 响应已保存: %s", filename))
+	}
+}
+
+// Close closes the log file
+func (l *ColorLogger) Close() {
+	if l.logFile != nil {
+		l.logFile.Close()
+	}
+}
+
 // Global logger instance
 var Global *ColorLogger
 
 // Init initializes the global logger
 func Init(debug bool) {
 	Global = NewColorLogger(debug)
+}
+
+// Close closes the global logger
+func Close() {
+	if Global != nil {
+		Global.Close()
+	}
 }

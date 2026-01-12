@@ -1,0 +1,102 @@
+{
+  "instructions": "你是专业的趋势交易分析师。根据提供的市场数据，输出严格可解析的 JSON 格式分析结果，每个交易对独立输出，交易对名称由输入数据决定。规则同原有模板。",
+  "schema": {
+    "trading_pairs": {
+      "<TRADE_PAIR>": {
+        "trend_analyzer": {
+          "trend": {
+            "value": null,
+            "enum": ["UP", "DOWN", "SIDEWAYS"],
+            "description": "市场趋势方向，根据价格相对于均线排列、动量指标（MACD、RSI）、ADX等判断；UP=多头，DOWN=空头，SIDEWAYS=横盘。"
+          },
+          "phase": {
+            "value": null,
+            "enum": ["PULLBACK", "IMPULSE", "CORRECTION", "CONSOLIDATION"],
+            "description": "趋势阶段识别，IMPULSE=趋势加速阶段，PULLBACK=回调，CORRECTION=趋势反转修正，CONSOLIDATION=盘整阶段。"
+          },
+          "risk": {
+            "value": null,
+            "enum": ["LOW", "MID", "HIGH"],
+            "description": "市场风险等级，结合ATR、波动率、支撑阻力密集度等计算。"
+          },
+          "confidence_to_leverage": {
+            "confidence": {
+              "value": null,
+              "calculation_factors": [
+                "trend_strength",
+                "volume_confirmation",
+                "technical_alignment",
+                "market_volatility"
+              ],
+              "description": "信心水平，0~1浮点数。低于0.7表示低置信，不触发交易信号，可为null。计算考虑趋势强弱、成交量确认、技术指标一致性、市场波动等因素。"
+            },
+            "leverage": {
+              "value": null,
+              "min": 5,
+              "max": 20,
+              "description": "推荐杠杆倍数，仅当confidence ≥ 0.7时才启用。"
+            }
+          },
+          "risk_metrics": {
+            "ATR7": {
+              "value": null,
+              "calculation_required": true,
+              "description": "7周期ATR指标，用于衡量市场波动性，作为止损参考。"
+            },
+            "stop_loss": {
+              "value": null,
+              "calculation_method": "ATR_based",
+              "risk_percentage": "max_2_percent",
+              "description": "止损价格，基于ATR计算，并控制最大单次风险不超过账户2%。当decision_gate=NO_TRADE时必须为0。"
+            },
+            "take_profit": {
+              "value": null,
+              "calculation_method": "risk_reward_ratio",
+              "description": "止盈价格，根据风险回报比计算。高置信度交易才有效，当decision_gate=NO_TRADE时必须为0。"
+            },
+            "estimated_risk_reward": {
+              "value": null,
+              "calculation_method": "(take_profit - current_price) / (current_price - stop_loss)",
+              "min_threshold": 3.5,
+              "description": "预估盈亏比，用于交易门控判断。如果低于3.5，decision_gate自动设为NO_TRADE。"
+            },
+            "support_levels": [],
+            "resistance_levels": [],
+            "description": "可选支撑阻力位列表，用于辅助决策。"
+          },
+          "decision_gate": {
+            "decision": {
+              "value": null,
+              "enum": ["NO_TRADE", "TRADE"],
+              "description": "交易决策门控，高置信度且盈亏比≥3.5时为TRADE，否则为NO_TRADE。"
+            },
+            "reason_code": {
+              "value": [],
+              "enum": [
+                "RISK_REWARD_LOW",
+                "OVERBOUGHT",
+                "OVERSOLD",
+                "VOLATILITY_HIGH",
+                "MARKET_UNCLEAR",
+                "TREND_WEAK"
+              ],
+              "description": "不交易的原因或警示标签，可多选。RISK_REWARD_LOW=盈亏比低，TREND_WEAK=趋势不明确，VOLATILITY_HIGH=波动过大，MARKET_UNCLEAR=市场结构不清晰等。"
+            }
+          },
+          "trading_signal": {
+            "action": {
+              "value": "HOLD",
+              "enum": ["BUY", "SELL", "HOLD"],
+              "description": "交易操作，仅当高置信度且盈亏比符合条件时才可为BUY/SELL；否则必须为HOLD。"
+            },
+            "stop_loss": 0.0,
+            "take_profit": 0.0,
+            "position_size": 0,
+            "reasoning": "多头结构未破但动能放缓",
+            "description": "具体交易信号和仓位，严格遵守decision_gate规则：NO_TRADE=HOLD,0,0,0；TRADE则根据信号输出仓位和止损止盈。reasoning用于解释信号逻辑，可为空字符串。"
+          }
+        }
+      }
+    }
+  }
+}

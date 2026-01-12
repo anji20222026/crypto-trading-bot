@@ -15,20 +15,21 @@
 ---
 
 ## 一点感想
+
 我首先抛出一个问题：为什么 LLM 在加密货币的交易中要**优于**我们自己操作？我想有下面这几点
+
 1. **纪律性**：币圈起起伏伏，人容易受到情绪影响，而 LLM 写到完 Prompt 之后几乎是按照你设定的规则去行动(虽然有偶尔幻觉的存在)
 2. **多币种处理**：LLM 可以同时分析多个交易对、多个时间周期的数据，而人很难做到这一点
 3. **持续工作**：LLM 可以 24/7 不间断地分析市场，这段时间我在测试系统的时候已经习惯每天早上起来查看币安的收益(那种刺激)
 
 不同的 LLM 的在量化市场中的表现都不尽相同，相信大家都是看了 nof1 的炒币大赛才来玩这个，表现最好的是 `Qwen3-max`还有 `DeepSeek`，那么我们应该去研究到底是什么让他们表现更好？
 
-我看了[Nof1交易分析](https://nof1.kcores.com/trading_summary_cards.html),深受启发，觉得`Qwen3-max`和 `DeepSeek`收益好主要有以下几点
-1. **极致的选择性**：Qwen3-max 在整个11天的测试中只交易了 **37** 次，DeepSeek 是 **55** 次，而表现最差的 gemini 2.5-pro 和 gpt5.1 分别是 **237** 次和 **135** 次；总结一下 Qwen3-max 和 DeepSeek 和 **武林高手**一样，该出手时就出手，而gemini 2.5-pro 和 gpt5.1这哼哈二将就像我们小散户一样
+我看了[Nof1 交易分析](https://nof1.kcores.com/trading_summary_cards.html),深受启发，觉得`Qwen3-max`和 `DeepSeek`收益好主要有以下几点
+
+1. **极致的选择性**：Qwen3-max 在整个 11 天的测试中只交易了 **37** 次，DeepSeek 是 **55** 次，而表现最差的 gemini 2.5-pro 和 gpt5.1 分别是 **237** 次和 **135** 次；总结一下 Qwen3-max 和 DeepSeek 和 **武林高手**一样，该出手时就出手，而 gemini 2.5-pro 和 gpt5.1 这哼哈二将就像我们小散户一样
 2. **高盈亏比交易**： Qwen3-max 的平均盈亏比是 **2.03:1** ，而表现差的 LLM 平均盈亏比都在 **1.2:1** 以下
 3. **胜率不是决定因素**: Qwen3-max 的胜率只有 **27%** ，DeepSeek 是 **38.2%** ，而表现差的 gpt5.1 胜率是 **51.1%** 说明胜率并不是决定盈利的关键，关键是要有**高盈亏比**和**极致选择性**
-4. **耐心持有**：如果你仔细分析了[nof1的交易记录](https://nof1.kcores.com/trading_timeline_with_btc.html)，你会发现 Qwen3-max 和 DeepSeek 的持仓时间都很长，基本上都是在趋势中持有，而不是频繁进出
-
-
+4. **耐心持有**：如果你仔细分析了[nof1 的交易记录](https://nof1.kcores.com/trading_timeline_with_btc.html)，你会发现 Qwen3-max 和 DeepSeek 的持仓时间都很长，基本上都是在趋势中持有，而不是频繁进出
 
 基于以上的分析，我设计了这个项目，具体的交易 prompt 可以看 `prompts/trader_json_no_trailing_stop.txt`，
 
@@ -37,15 +38,12 @@
 另外我没有设计**止盈**的功能，目前只有**追踪止损**，通过 ATR 公式来动态的调整止损，核心思想还是遵循：**让利润奔跑**。
 
 【追踪止损例子】：
+
 - 初始止损：60400（-2.5%）
 - 涨到 65000：止损移至 63375（保本以上）
 - 涨到 70000：止损移至 68250（+10%）
 - 涨到 73000：止损移至 71175（+14.8%）
 - 回调到 71000：触发止损，获利 9000 USDT
-
-
-
-
 
 ---
 
@@ -64,6 +62,7 @@
 ## 🚀 快速开始
 
 ### ⚠️⚠️⚠️ 注意 ! ! !
+
 **此项目最佳使用模式为：**
 
 - **仓位模式**：单向模式
@@ -74,7 +73,7 @@
 
 - **Go 1.21 或更高版本**
 - 币安期货账户
-- OpenAI 兼容 API Key（OpenAI、DeepSeek、Qwen等）
+- OpenAI 兼容 API Key（OpenAI、DeepSeek、Qwen 等）
 
 ### 安装
 
@@ -93,6 +92,7 @@ make build-all
 ### 配置
 
 1. 复制配置文件模板：
+
 ```bash
 cp .env.example .env
 ```
@@ -196,19 +196,24 @@ Web 界面默认地址：`http://localhost:8080`
 ### 1. 新手推荐流程
 
 **第一步：使用 AUTO_EXECUTE=false 测试**
+
 ```env
 AUTO_EXECUTE=false
 BINANCE_POSITION_MODE=oneway
 ```
+
 运行 `make run-web`，观察 LLM 决策 1-2 天
 
 **第二步：启用自动执行**
+
 ```env
 AUTO_EXECUTE=true
 ```
+
 密切监控，随时准备停止系统
 
 **第三步：优化策略**
+
 - 根据结果调整杠杆范围
 - 在 `prompts/trader_json_no_trailing_stop.txt` 中微调交易 Prompt
 - 监控余额曲线和持仓表现
@@ -216,27 +221,34 @@ AUTO_EXECUTE=true
 ### 2. 理解时间周期配置
 
 **场景 1：标准模式**（K 线间隔 = 运行间隔）（⭐ 推荐）
+
 ```env
 CRYPTO_TIMEFRAME=15m
 TRADING_INTERVAL=15m  # （或省略，默认使用 CRYPTO_TIMEFRAME）
 ```
+
 结果：每 15 分钟获取 15 分钟 K 线数据
 
 **场景 2：精细 K 线 + 低频决策**
+
 ```env
 CRYPTO_TIMEFRAME=3m      # 基于 3 分钟 K 线计算指标
 TRADING_INTERVAL=15m     # 每 15 分钟做一次决策
 ```
+
 好处：
+
 - 更精确的技术指标（EMA、MACD、RSI 基于 3m 数据）
 - 避免过度交易（仅每 15 分钟决策一次）
 - 兼得精确性与耐心
 
 **场景 3：不推荐**（K 线间隔 > 运行间隔）
+
 ```env
 CRYPTO_TIMEFRAME=1h
 TRADING_INTERVAL=15m
 ```
+
 问题：每 15 分钟运行但 1 小时 K 线未更新，浪费 API 调用
 
 ### 3. 自定义交易策略
@@ -245,10 +257,11 @@ TRADING_INTERVAL=15m
 
 ```bash
 # 使用不同的 Prompt 文件
-TRADER_PROMPT_PATH=prompts/trader_aggressive.txt 
+TRADER_PROMPT_PATH=prompts/trader_aggressive.txt
 ```
 
 提供的策略模板：
+
 - `trader_optimized.txt` - 趋势交易，极度选择性（推荐）
 - `trader_system.txt` - 趋势交易，平衡方法
 - `trader_aggressive.txt` - 短线交易，积极捕捉机会
@@ -272,6 +285,24 @@ curl http://localhost:8080/api/balance/history    # 余额历史
 curl http://localhost:8080/api/positions          # 当前持仓
 ```
 
+### 6. 运行市场数据 Demo
+
+如果你想先了解系统如何获取和处理市场数据，可以运行 demo：
+
+```bash
+# 运行 demo（会输出结构化的市场数据）
+make demo
+```
+
+Demo 会：
+
+- 从 `.env` 加载配置
+- 连接币安 API 获取市场数据
+- 计算所有技术指标
+- 输出结构化的 JSON 数据到 `market_data_output.json`
+
+详细说明请查看：[cmd/demo/README.md](cmd/demo/README.md)
+
 ---
 
 ## 📁 项目结构
@@ -281,7 +312,8 @@ crypto-trading-bot/
 ├── cmd/
 │   ├── main.go           # 单次执行模式入口
 │   ├── web/main.go       # Web 监控模式入口
-│   └── query/main.go     # 数据查询工具
+│   ├── query/main.go     # 数据查询工具
+│   └── demo/main.go      # 市场数据 Demo
 ├── internal/
 │   ├── agents/           # AI 智能体（Eino Graph 工作流）
 │   ├── dataflows/        # 市场数据获取和指标计算
@@ -293,6 +325,8 @@ crypto-trading-bot/
 │   ├── config/           # 配置加载
 │   └── logger/           # 日志系统
 ├── prompts/              # 外部 Prompt 文件
+├── docs/                 # 文档
+│   └── STRUCTURED_DATA.md  # 结构化数据说明
 ├── data/                 # SQLite 数据库文件
 ├── .env.example          # 配置文件模板
 ├── Makefile              # 构建脚本
@@ -320,6 +354,7 @@ START → [市场分析师, 情绪分析师]（并行）
 ### 市场报告格式
 
 **日内报告**（基于 CRYPTO_TIMEFRAME，例如 3m）:
+
 ```
 === BTC Market Report ===
 
@@ -335,6 +370,7 @@ RSI(14): [55.0, 56.0, 58.0, ..., 60.5]
 ```
 
 **长期报告**（CRYPTO_LONGER_TIMEFRAME，例如 4h）:
+
 ```
 长期数据 (4h):
 
@@ -379,9 +415,9 @@ make query ARGS="symbol BTC/USDT 3"     # 特定交易对
 3. **使用单向持仓**：`BINANCE_POSITION_MODE=oneway`（双向持仓模式有 bug）
 4. **监控运行**：定期查看 Web 界面和日志
 5. **API 安全**：
-    - 使用 IP 白名单限制 API 访问
-    - 永远不要分享你的 API 密钥
-    - 只授予必要的权限（仅期货交易）
+   - 使用 IP 白名单限制 API 访问
+   - 永远不要分享你的 API 密钥
+   - 只授予必要的权限（仅期货交易）
 6. **动态杠杆**：使用 `10-20` 范围，LLM 根据置信度选择
 7. **始终开启止损**：保持 `ENABLE_STOPLOSS=true`
 
@@ -394,21 +430,24 @@ make query ARGS="symbol BTC/USDT 3"     # 特定交易对
 ### 常见问题
 
 1. **余额曲线图不显示**
-    - 确保程序已运行至少 5-10 分钟
-    - 检查数据库：`sqlite3 data/trading.db "SELECT COUNT(*) FROM balance_history;"`
+
+   - 确保程序已运行至少 5-10 分钟
+   - 检查数据库：`sqlite3 data/trading.db "SELECT COUNT(*) FROM balance_history;"`
 
 2. **下次交易时间不正确**
-    - 检查 `.env` 中的 `TRADING_INTERVAL` 是否正确设置
-    - Web 页面现在会同时显示"K 线间隔"和"运行间隔"
+
+   - 检查 `.env` 中的 `TRADING_INTERVAL` 是否正确设置
+   - Web 页面现在会同时显示"K 线间隔"和"运行间隔"
 
 3. **持仓显示异常**
-    - 确认 `BINANCE_POSITION_MODE=oneway`（推荐）
-    - 检查币安账户实际持仓模式
+
+   - 确认 `BINANCE_POSITION_MODE=oneway`（推荐）
+   - 检查币安账户实际持仓模式
 
 4. **编译错误**
-    - 确保 Go 版本 >= 1.21
-    - 运行 `make deps` 更新依赖
-    - 清理后重新编译：`make clean && make build-all`
+   - 确保 Go 版本 >= 1.21
+   - 运行 `make deps` 更新依赖
+   - 清理后重新编译：`make clean && make build-all`
 
 ---
 
@@ -426,12 +465,14 @@ make query ARGS="symbol BTC/USDT 3"     # 特定交易对
 本项目是从 Python 完全重写为 Go 版本：
 
 **主要变化**：
+
 - LangGraph → Eino Graph（Cloudwego）
 - CCXT → go-binance（官方 SDK）
 - pandas → 原生 Go 切片操作
 - Flask → Hertz（Cloudwego）
 
 **优势**：
+
 - 更高的性能和并发能力
 - 更低的资源占用
 - 更快的启动速度

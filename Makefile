@@ -1,4 +1,4 @@
-.PHONY: build run clean test help query build-web run-web
+.PHONY: build run clean test help query build-web run-web demo
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -7,11 +7,13 @@
 BINARY_NAME=crypto-trading-bot
 WEB_BINARY=crypto-trading-bot-web
 QUERY_BINARY=query
+DEMO_BINARY=demo
 BUILD_DIR=bin
 CMD_DIR=cmd
 MAIN_FILE=$(CMD_DIR)/main.go
 WEB_FILE=$(CMD_DIR)/web/main.go
 QUERY_FILE=$(CMD_DIR)/query/main.go
+DEMO_FILE=$(CMD_DIR)/demo/main.go
 
 ## build: 编译项目
 build:
@@ -51,6 +53,15 @@ query:
 	@go build -o $(BUILD_DIR)/$(QUERY_BINARY) $(QUERY_FILE)
 	@./$(BUILD_DIR)/$(QUERY_BINARY) $(ARGS)
 
+## demo: 编译并运行市场数据 Demo
+demo:
+	@echo "🔨 编译 Demo 程序..."
+	@mkdir -p $(BUILD_DIR)
+	@go build -o $(BUILD_DIR)/$(DEMO_BINARY) $(DEMO_FILE)
+	@echo "✅ Demo 编译完成"
+	@echo "🚀 运行 Demo..."
+	@./$(BUILD_DIR)/$(DEMO_BINARY)
+
 ## clean: 清理编译产物
 clean:
 	@echo "🧹 清理编译产物..."
@@ -70,6 +81,26 @@ test-cover:
 	@go test ./internal/... -coverprofile=coverage.out
 	@go tool cover -html=coverage.out -o coverage.html
 	@echo "✅ 覆盖率报告已生成: coverage.html"
+
+## test-ollama-simple: 测试 Ollama 极简交易决策（推荐）⭐
+test-ollama-simple:
+	@echo "🦙 测试 Ollama 极简交易决策..."
+	@go test -v -run TestOllamaSimpleTradingDecision ./internal/agents -timeout 60s
+
+## test-ollama-connection: 测试 Ollama 连接和模型列表
+test-ollama-connection:
+	@echo "🦙 测试 Ollama 连接..."
+	@go test -v -run TestOllamaConnection ./internal/agents
+
+## test-ollama-trading: 测试 Ollama DeepSeek 交易决策
+test-ollama-trading:
+	@echo "🦙 测试 Ollama DeepSeek 交易决策..."
+	@go test -v -run TestOllamaDeepSeekTrading ./internal/agents
+
+## test-ollama-all: 运行所有 Ollama 测试
+test-ollama-all:
+	@echo "🦙 运行所有 Ollama 测试..."
+	@go test -v -run TestOllama ./internal/agents -timeout 120s
 
 ## deps: 安装依赖
 deps:

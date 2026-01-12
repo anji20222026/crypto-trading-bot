@@ -46,6 +46,7 @@ type TechnicalIndicators struct {
 	ATR_7     []float64 // ATR(7) - 7期平均真实波幅
 	ATR_3     []float64 // ATR(3) - 3期平均真实波幅
 	Volume    []float64
+	VWAP      []float64 // VWAP - Volume Weighted Average Price 成交量加权平均价
 
 	// New indicators for trend strength and confirmation
 	// 新增指标：趋势强度和确认
@@ -201,6 +202,11 @@ func CalculateIndicators(ohlcvData []OHLCV, atrPeriod ...int) *TechnicalIndicato
 	// New indicators for trend strength and volume confirmation
 	// 新增指标：趋势强度和成交量确认
 	adx, diPlus, diMinus := calculateADX(highs, lows, closes, 14)
+
+	// Calculate 24h rolling VWAP window based on candle interval
+	// 根据 K 线时间间隔计算 24 小时对应的窗口大小（K 线数量）
+	vwapWindow := calculate24hWindowBars(ohlcvData)
+	vwap := calculateVWAP(highs, lows, closes, volumes, vwapWindow)
 	volumeRatio := calculateVolumeRatio(volumes, 20)
 
 	return &TechnicalIndicators{
@@ -222,6 +228,7 @@ func CalculateIndicators(ohlcvData []OHLCV, atrPeriod ...int) *TechnicalIndicato
 		ATR_7:     atr7,
 		ATR_3:     atr3, // 新增
 		Volume:    volumes,
+		VWAP:      vwap,
 
 		// New indicators
 		// 新增指标
@@ -230,6 +237,42 @@ func CalculateIndicators(ohlcvData []OHLCV, atrPeriod ...int) *TechnicalIndicato
 		DI_Minus:    diMinus,
 		VolumeRatio: volumeRatio,
 	}
+}
+
+// calculate24hWindowBars infers how many candles roughly represent 24 hours
+// 根据 OHLCV 时间戳推断 24 小时内包含的 K 线数量（用于 VWAP 滚动窗口）
+func calculate24hWindowBars(ohlcvData []OHLCV) int {
+	n := len(ohlcvData)
+	if n <= 1 {
+		if n == 1 {
+			return 1
+		}
+		return 0
+	}
+
+	// Use the interval between the first two candles as the base timeframe
+	// 使用前两根 K 线的时间差作为基础时间周期
+	interval := ohlcvData[1].Timestamp.Sub(ohlcvData[0].Timestamp)
+	if interval <= 0 {
+		return n
+	}
+
+	minutes := int(interval.Minutes())
+	if minutes <= 0 {
+		minutes = 1
+	}
+
+	// 24 hours = 1440 minutes
+	// 24 小时 = 1440 分钟
+	windowBars := 1440 / minutes
+	if windowBars < 1 {
+		windowBars = 1
+	}
+	if windowBars > n {
+		windowBars = n
+	}
+
+	return windowBars
 }
 
 // calculateSMA calculates Simple Moving Average
@@ -572,6 +615,59 @@ func calculateADX(highs, lows, closes []float64, period int) (adx, diPlus, diMin
 	return adx, diPlus, diMinus
 }
 
+// calculateVWAP calculates a rolling Volume Weighted Average Price over a fixed window
+// windowBars is typically the number of candles in 24h for the current timeframe (e.g. 96 for 15m)
+// calculateVWAP 计算固定窗口的滚动成交量加权平均价
+// windowBars 通常是当前时间周期下 24 小时包含的 K 线数量（例如 15m = 96 根）
+func calculateVWAP(highs, lows, closes, volumes []float64, windowBars int) []float64 {
+	n := len(closes)
+	result := make([]float64, n)
+
+	// 基本安全检查：长度必须一致且非空
+	if n == 0 || len(highs) != n || len(lows) != n || len(volumes) != n {
+		for i := range result {
+			result[i] = math.NaN()
+		}
+		return result
+	}
+
+	if windowBars <= 0 {
+		windowBars = n
+	}
+
+	// Use prefix sums for O(1) window aggregation
+	// 使用前缀和实现 O(1) 的窗口聚合
+	cumPV := make([]float64, n+1)
+	cumVol := make([]float64, n+1)
+
+	for i := 0; i < n; i++ {
+		// 使用典型价 (High+Low+Close)/3 作为价格代表
+		typicalPrice := (highs[i] + lows[i] + closes[i]) / 3.0
+		vol := volumes[i]
+		pv := typicalPrice * vol
+
+		cumPV[i+1] = cumPV[i] + pv
+		cumVol[i+1] = cumVol[i] + vol
+
+		// Sliding window [start, i]
+		// 滚动窗口 [start, i]
+		start := 0
+		if i+1 > windowBars {
+			start = i + 1 - windowBars
+		}
+
+		windowPV := cumPV[i+1] - cumPV[start]
+		windowVol := cumVol[i+1] - cumVol[start]
+		if windowVol == 0 {
+			result[i] = math.NaN()
+		} else {
+			result[i] = windowPV / windowVol
+		}
+	}
+
+	return result
+}
+
 // calculateVolumeRatio calculates volume ratio compared to average
 // calculateVolumeRatio 计算成交量比率（相对于平均值）
 // Ratio > 1.5: 放量 / High volume
@@ -677,6 +773,13 @@ func FormatIndicatorReport(symbol string, timeframe string, ohlcvData []OHLCV, i
 		currentMACD = indicators.MACD[lastIdx]
 	}
 
+	// 当前 24 小时 VWAP（基于滚动窗口）
+	// Current 24h VWAP based on rolling window
+	currentVWAP := math.NaN()
+	if len(indicators.VWAP) > lastIdx && !math.IsNaN(indicators.VWAP[lastIdx]) {
+		currentVWAP = indicators.VWAP[lastIdx]
+	}
+
 	//currentMACDSignal := 0.0
 	//if len(indicators.Signal) > lastIdx && !math.IsNaN(indicators.Signal[lastIdx]) {
 	//	currentMACDSignal = indicators.Signal[lastIdx]
@@ -697,9 +800,20 @@ func FormatIndicatorReport(symbol string, timeframe string, ohlcvData []OHLCV, i
 		currentADX = indicators.ADX[lastIdx]
 	}
 
-	sb.WriteString(fmt.Sprintf("当前价格 = %.1f, EMA(12) = %.1f, EMA(26) = %.1f\n", latestClosePrice, currentEMA12, currentEMA26))
+	// 构造 VWAP(24h滚动) 文本，仅在可用时追加
+	// Build VWAP(24h rolling) text, append only when available
+	vwapText := ""
+	if !math.IsNaN(currentVWAP) && currentVWAP > 0 {
+		diffPct := (latestClosePrice - currentVWAP) / currentVWAP * 100
+		vwapText = fmt.Sprintf(", VWAP(24h滚动) = %.1f (价格较VWAP(24h滚动) %+0.2f%%)", currentVWAP, diffPct)
+	}
+
+	sb.WriteString(fmt.Sprintf("当前价格 = %.1f, EMA(12) = %.1f, EMA(26) = %.1f%s\n", latestClosePrice, currentEMA12, currentEMA26, vwapText))
 	sb.WriteString(fmt.Sprintf("MACD = %.1f,  RSI(7) = %.1f, RSI(14) = %.1f, ADX = %.1f\n\n", currentMACD, currentRSI7, currentRSI14, currentADX))
-	sb.WriteString(fmt.Sprintf("下述所有价格或信号数据均按时间从旧到新排列。\n\n"))
+	// 说明 VWAP(24h滚动) 的定义，避免被误解为「开盘以来 VWAP」
+	// Explain VWAP(24h rolling) definition to avoid confusion with intraday VWAP
+	sb.WriteString("说明：本报告中的 VWAP(24h滚动)，是过去连续24小时的成交量加权平均价（跨日滚动计算），不是“今天开盘到现在”的日内 VWAP。\n\n")
+	sb.WriteString("下述所有价格或信号数据均按时间从旧到新排列。\n\n")
 
 	// === 日内数据（最近10期）===
 	// === Intraday Data (Last 10 periods) ===
@@ -725,14 +839,30 @@ func FormatIndicatorReport(symbol string, timeframe string, ohlcvData []OHLCV, i
 		return "[" + strings.Join(values, ", ") + "]"
 	}
 
-	// 1. 中间价序列（High + Low）/ 2
-	// Mid Price Series (High + Low) / 2
+	// 1. 中间价及相对 VWAP(24h滚动) 偏离% 序列
+	// 1. Mid prices and deviations from VWAP(24h rolling) in percentage
 	var midPrices []float64
 	for i := startIdx; i <= lastIdx; i++ {
 		midPrice := (ohlcvData[i].High + ohlcvData[i].Low) / 2
 		midPrices = append(midPrices, midPrice)
 	}
-	sb.WriteString(fmt.Sprintf("中间价(%s间隔): %s\n\n", timeframe, formatSeries(midPrices, 0, len(midPrices)-1, 1)))
+
+	if !math.IsNaN(currentVWAP) && currentVWAP > 0 {
+		// 同时打印中间价与相对 VWAP(24h滚动) 的偏离百分比，格式为 price:dev%%
+		// Print mid price and deviation from VWAP(24h rolling) together as price:dev%%
+		var pairs []string
+		for _, price := range midPrices {
+			dev := (price - currentVWAP) / currentVWAP * 100
+			pairs = append(pairs, fmt.Sprintf("%.1f:%.2f", price, dev))
+		}
+		// 注意：这里使用 "%%" 在 fmt.Sprintf 中输出一个真实的百分号 "%"
+		// Note: use "%%" in fmt.Sprintf format string to output a literal "%" character
+		sb.WriteString(fmt.Sprintf("中间价及相对 VWAP(24h滚动) 偏离%%(%s间隔): [%s]\n\n", timeframe, strings.Join(pairs, ", ")))
+	} else {
+		// 若当前 VWAP 不可用，仅输出中间价序列
+		// If current VWAP is not available, only output mid price series
+		sb.WriteString(fmt.Sprintf("中间价(%s间隔): %s\n\n", timeframe, formatSeries(midPrices, 0, len(midPrices)-1, 1)))
+	}
 
 	// 2. EMA(12) + EMA(26) 快慢EMA系统（MACD基础）
 	// EMA(12) + EMA(26) Fast/Slow EMA System (MACD basis: MACD = EMA12 - EMA26)
@@ -953,6 +1083,81 @@ func (m *MarketData) GetTopLongShortPositionRatio(ctx context.Context, symbol st
 	return result, nil
 }
 
+// GetVWAPDeviationHistory 获取 VWAP 历史偏离数据（价格序列和偏离百分比）
+// GetVWAPDeviationHistory gets VWAP deviation history (price series and deviation percentages)
+func (m *MarketData) GetVWAPDeviationHistory(ctx context.Context, symbol string, timeframe string, lookbackPeriods int) (map[string]interface{}, error) {
+	// Get OHLCV data for the specified timeframe
+	// 获取指定时间框架的 OHLCV 数据
+	lookbackDays := 2 // 2 days should be enough for most timeframes
+	ohlcvData, err := m.GetOHLCV(ctx, symbol, timeframe, lookbackDays)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch OHLCV data: %w", err)
+	}
+
+	if len(ohlcvData) < lookbackPeriods {
+		return nil, fmt.Errorf("insufficient data: got %d periods, need %d", len(ohlcvData), lookbackPeriods)
+	}
+
+	// Calculate VWAP for 24-hour rolling window
+	// 计算 24 小时滚动窗口的 VWAP
+	indicators := CalculateIndicators(ohlcvData)
+	if len(indicators.VWAP) == 0 {
+		return nil, fmt.Errorf("failed to calculate VWAP")
+	}
+
+	// Get the last N periods
+	// 获取最近 N 个周期
+	startIdx := len(ohlcvData) - lookbackPeriods
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	priceHistory := make([]float64, 0, lookbackPeriods)
+	deviationHistory := make([]float64, 0, lookbackPeriods)
+
+	// Extract price and deviation data
+	// 提取价格和偏离数据
+	for i := startIdx; i < len(ohlcvData); i++ {
+		// Use mid price (average of high and low)
+		// 使用中间价（最高价和最低价的平均值）
+		midPrice := (ohlcvData[i].High + ohlcvData[i].Low) / 2
+		priceHistory = append(priceHistory, midPrice)
+
+		// Calculate deviation from VWAP
+		// 计算相对于 VWAP 的偏离
+		if i < len(indicators.VWAP) && !math.IsNaN(indicators.VWAP[i]) && indicators.VWAP[i] > 0 {
+			deviation := ((midPrice - indicators.VWAP[i]) / indicators.VWAP[i]) * 100
+			deviationHistory = append(deviationHistory, deviation)
+		} else {
+			deviationHistory = append(deviationHistory, 0.0)
+		}
+	}
+
+	// Get current VWAP value
+	// 获取当前 VWAP 值
+	currentVWAP := 0.0
+	if len(indicators.VWAP) > 0 && !math.IsNaN(indicators.VWAP[len(indicators.VWAP)-1]) {
+		currentVWAP = indicators.VWAP[len(indicators.VWAP)-1]
+	}
+
+	// Calculate current deviation
+	// 计算当前偏离
+	currentDeviation := 0.0
+	if len(ohlcvData) > 0 && currentVWAP > 0 {
+		currentPrice := (ohlcvData[len(ohlcvData)-1].High + ohlcvData[len(ohlcvData)-1].Low) / 2
+		currentDeviation = ((currentPrice - currentVWAP) / currentVWAP) * 100
+	}
+
+	result := map[string]interface{}{
+		"vwap_24h":          currentVWAP,
+		"current_deviation": currentDeviation,
+		"price_history":     priceHistory,
+		"deviation_history": deviationHistory,
+	}
+
+	return result, nil
+}
+
 // GetOpenInterestChange 获取持仓量变化统计（对比当前和历史数据）
 // GetOpenInterestChange gets open interest change by comparing current and historical data
 func (m *MarketData) GetOpenInterestChange(ctx context.Context, symbol string, period string, limit int) (map[string]interface{}, error) {
@@ -998,12 +1203,35 @@ func (m *MarketData) GetOpenInterestChange(ctx context.Context, symbol string, p
 	// API already returns data in chronological order, so no need to reverse
 	// API 已经按时间顺序返回数据，无需反转
 	seriesValues := make([]float64, 0, len(stats))
+	seriesVolumes := make([]float64, 0, len(stats))
+	changeRates := make([]float64, 0, len(stats))
+
 	for i := 0; i < len(stats); i++ {
 		value, err := strconv.ParseFloat(stats[i].SumOpenInterestValue, 64)
 		if err != nil {
 			continue
 		}
+		volume, err := strconv.ParseFloat(stats[i].SumOpenInterest, 64)
+		if err != nil {
+			continue
+		}
+
 		seriesValues = append(seriesValues, value)
+		seriesVolumes = append(seriesVolumes, volume)
+
+		// Calculate change rate relative to previous point
+		// 计算相对于上一个点的变化率
+		if i == 0 {
+			changeRates = append(changeRates, 0.0) // First point has no previous, set to 0
+		} else {
+			prevValue, _ := strconv.ParseFloat(stats[i-1].SumOpenInterest, 64)
+			if prevValue > 0 {
+				changeRate := ((volume - prevValue) / prevValue) * 100
+				changeRates = append(changeRates, changeRate)
+			} else {
+				changeRates = append(changeRates, 0.0)
+			}
+		}
 	}
 
 	result := map[string]interface{}{
@@ -1014,6 +1242,8 @@ func (m *MarketData) GetOpenInterestChange(ctx context.Context, symbol string, p
 		"change_percent":    changePercent,
 		"timestamp":         stats[lastIdx].Timestamp, // Use newest timestamp / 使用最新时间戳
 		"series_values":     seriesValues,
+		"series_volumes":    seriesVolumes, // 持仓量序列 / Open interest volume series
+		"change_rates":      changeRates,   // 变化率序列 / Change rate series
 	}
 
 	return result, nil

@@ -1,0 +1,46 @@
+{
+  "trend_analyzer_bot": {
+    "trend_identification": {
+      "trend": "UP | DOWN | SIDEWAYS",
+      "reasoning": "AI 根据多时间框架价格、均线、MACD、RSI等综合判断趋势方向（5m/15m/1h/4h参考）",
+      "summary": "趋势方向简述"
+    },
+    "phase_identification": {
+      "phase": "IMPULSE | PULLBACK | CORRECTION | DISTRIBUTION",
+      "reasoning": "AI 根据动量、回调幅度、均线排列判断阶段（多周期参考），确保逻辑自洽",
+      "summary": "趋势阶段简述"
+    },
+    "risk_assessment": {
+      "risk": "LOW | MID | HIGH",
+      "reasoning": "AI 根据价格结构、波动率、成交量判断风险等级",
+      "summary": "风险等级简述"
+    },
+    "confidence_to_leverage": {
+      "confidence": 0.50-0.95,
+      "leverage": 5 | 8 | 12 | 15,
+      "summary": "根据置信度映射仓位/杠杆，固定规则：\n0.90-1.00 → 15倍杠杆\n0.80-0.89 → 12倍杠杆\n0.70-0.79 → 8倍杠杆\n0.60-0.69 → 5倍杠杆\n<0.60 → NO_TRADE"
+    },
+    "decision_gate": {
+      "decision": "ALLOW_TRADE | NO_TRADE",
+      "reason_code": ["CONFIDENCE_OK", "PHASE_OK", "TREND_OK", "RISK_ACCEPTABLE"],
+      "summary": "基于 trend / phase / confidence / risk 拦截低质量交易"
+    },
+    "trading_signal": {
+      "action": "BUY | SELL | HOLD",
+      "entry_type": "MARKET | LIMIT",
+      "entry_price": "MARKET 或具体价格，由 AI 结合支撑/阻力计算",
+      "stop_loss": "根据最近支撑/阻力或固定百分比设置，AI 必须输出实际价格",
+      "take_profit": "根据盈亏比或关键阻力/支撑计算，AI 必须输出实际价格",
+      "position_size": "根据 confidence_to_leverage 映射计算实际仓位，AI 必须输出非0数值",
+      "summary": "市场单买入/卖出，止损和止盈根据技术位或固定比例设置，仓位映射 confidence",
+      "reasoning": "简述开仓逻辑，例如‘价格接近支撑，趋势向上，RSI未超买’"
+    },
+    "notes": [
+      "所有字段必须输出，否则下单系统无法执行",
+      "phase 判定由 AI 自主完成，不固定指标组合",
+      "支持多时间框架参考（5m/15m/1h/4h）",
+      "entry_price 可为市场价或限价，stop_loss 和 take_profit 必须输出实际价格",
+      "position_size 需映射 confidence_to_leverage 输出非零值"
+    ]
+  }
+}

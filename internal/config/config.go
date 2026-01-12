@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/oak/crypto-trading-bot/internal/constant"
-	"github.com/spf13/viper"
 	"os"
 	"strings"
+
+	"github.com/oak/crypto-trading-bot/internal/constant"
+	"github.com/spf13/viper"
 )
 
 // Config holds all configuration for the crypto trading bot
@@ -76,6 +77,14 @@ type Config struct {
 	// 注意：追踪止损参数（更新阈值、ATR倍数等）在 internal/executors/trailing_stop_calculator.go 中为每个币种配置
 	EnableStopLoss        bool // 是否启用止损管理 / Enable stop-loss management
 	TrailingStopATRPeriod int  // 追踪止损的 ATR 周期（从长期时间周期计算，推荐 3/7/14）/ ATR period for trailing stop (calculated from longer timeframe, recommended 3/7/14)
+
+	// Position management configuration (multi-symbol)
+	// 仓位管理配置（多币种）
+	TotalPositionLimit     float64 // 总仓位上限（所有币种加起来）/ Total position limit (sum of all symbols), e.g., 60.0 means 60%
+	MaxSymbolPosition      float64 // 单币种最大仓位 / Max position per symbol, e.g., 30.0 means 30%
+	MinSymbolPosition      float64 // 单币种最小仓位 / Min position per symbol, e.g., 10.0 means 10%
+	PositionAllocationMode string  // 仓位分配模式 / Position allocation mode: "equal", "weighted", "fixed"
+	FixedPositionSize      float64 // 固定仓位大小（仅当 mode=fixed 时生效）/ Fixed position size (only when mode=fixed)
 
 	// Memory system
 	UseMemory  bool
@@ -172,6 +181,14 @@ func LoadConfig(pathToEnv string) (*Config, error) {
 		// 追踪止损参数在 internal/executors/trailing_stop_calculator.go 中配置
 		EnableStopLoss:        viper.GetBool("ENABLE_STOPLOSS"),
 		TrailingStopATRPeriod: viper.GetInt("TRAILING_STOP_ATR_PERIOD"),
+
+		// Position management (multi-symbol)
+		// 仓位管理（多币种）
+		TotalPositionLimit:     viper.GetFloat64("TOTAL_POSITION_LIMIT"),
+		MaxSymbolPosition:      viper.GetFloat64("MAX_SYMBOL_POSITION"),
+		MinSymbolPosition:      viper.GetFloat64("MIN_SYMBOL_POSITION"),
+		PositionAllocationMode: viper.GetString("POSITION_ALLOCATION_MODE"),
+		FixedPositionSize:      viper.GetFloat64("FIXED_POSITION_SIZE"),
 
 		// Memory system
 		UseMemory:  viper.GetBool("USE_MEMORY"),
@@ -310,6 +327,14 @@ func setDefaults() {
 	// 追踪止损参数在 internal/executors/trailing_stop_calculator.go 中配置
 	viper.SetDefault("ENABLE_STOPLOSS", true)       // 启用止损管理 / Enable stop-loss management
 	viper.SetDefault("TRAILING_STOP_ATR_PERIOD", 7) // 追踪止损 ATR 周期，推荐 3（短期）/7（平衡）/14（长期）/ Trailing stop ATR period, recommended 3 (short) / 7 (balanced) / 14 (long)
+
+	// Position management defaults (multi-symbol)
+	// 仓位管理默认值（多币种）
+	viper.SetDefault("TOTAL_POSITION_LIMIT", 60.0)         // 总仓位上限 60% / Total position limit 60%
+	viper.SetDefault("MAX_SYMBOL_POSITION", 30.0)          // 单币种最大 30% / Max 30% per symbol
+	viper.SetDefault("MIN_SYMBOL_POSITION", 10.0)          // 单币种最小 10% / Min 10% per symbol
+	viper.SetDefault("POSITION_ALLOCATION_MODE", "weighted") // 默认按置信度加权 / Default: weighted by confidence
+	viper.SetDefault("FIXED_POSITION_SIZE", 20.0)          // 固定模式下的仓位 20% / Fixed mode: 20% per signal
 
 	viper.SetDefault("USE_MEMORY", true)
 	viper.SetDefault("MEMORY_TOP_K", 3)
