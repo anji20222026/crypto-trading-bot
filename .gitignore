@@ -46,3 +46,4 @@ test_*.db
 *.test
 test/
 
+internal/agents/logs/*
