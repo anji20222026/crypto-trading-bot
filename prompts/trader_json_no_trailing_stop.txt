@@ -5,7 +5,7 @@
         "1": "基于 Primary Timeframe 完成 decision_gate 判断（TRADE / NO_TRADE）。",
         "2": "decision_gate = NO_TRADE 时：不得引用 ATR、波动性、止损宽窄、风险空间。",
         "3": "decision_gate = TRADE 时：允许计算 ATR，仅用于 stop_loss_distance 与盈亏比，不得改变趋势判断或 decision_gate。",
-        "4": "ATR 不得作为交易允许与否的前置条件。"
+        "4": "ATR 不能作为 TRADE 条件前置，不得用于支撑/阻力、趋势判断、confidence 或盈亏比预估。"
       },
       "Timeframe Role Rule": {
         "Primary": {
@@ -26,7 +26,19 @@
         "estimated_risk_reward": "基于 Primary Timeframe 结构空间计算，decision_gate=TRADE 时才使用 ATR 校准 stop_loss_distance",
         "TRADE条件": ["confidence ≥ 0.7", "estimated_risk_reward ≥ 3.5"],
         "NO_TRADE条件": ["confidence < 0.7 或 estimated_risk_reward < 3.5"],
-        "NO_TRADE输出": {"trading_signal.action": "HOLD", "position_size": 0, "stop_loss": 0, "take_profit": 0}
+        "TRADE输出规则": {
+          "description": "TRADE条件满足时，trading_signal.action 必须严格由分析结果生成，禁止输出 HOLD。",
+          "reason_code_required": true,
+          "reasoning_rule": "reasoning 可描述风险点，但不能改变 action"
+        },
+        "NO_TRADE输出": {
+          "trading_signal.action": "HOLD",
+          "position_size": 0,
+          "stop_loss": 0,
+          "take_profit": 0,
+          "reasoning_rule": "reasoning 可描述风险点，但不能改变 action",
+          "reason_code_required": true
+        }
       },
       "Support / Resistance Rule": {
         "source_priority": ["Primary Timeframe swing high / swing low", "Primary Timeframe EMA", "VWAP", "布林带上下轨辅助"],
@@ -40,14 +52,32 @@
         "confidence使用限制": "平仓判断不得参考 confidence"
       },
       "Risk Metrics": {
-        "ATR": {"value": null, "timeframe": "1h"},
-        "support_levels": {"value": []},
-        "resistance_levels": {"value": []}
+        "ATR": {
+            "value": null,
+            "timeframe": "1h",
+            "calculation_required": false,
+            "usage": ["STOP_LOSS_DISTANCE (仅在 decision_gate=TRADE 时)"],
+            "forbidden_usage": ["TREND_DIRECTION", "TREND_PHASE", "CONFIDENCE", "ENTRY_DECISION", "POSITION_SIZE", "SUPPORT_LEVELS", "RESISTANCE_LEVELS"],
+            "notes": "ATR 仅用于 TRADE 时校准止损距离，不能用于任何趋势判断或盈亏比计算前置条件"
+        },
+        "support_levels": {
+            "value": [],
+            "source": "",
+            "allowed_sources": ["Primary Timeframe swing low", "Primary Timeframe EMA", "VWAP"],
+            "description": "支撑线只能来源于允许的列表，禁止虚拟或 ATR 生成"
+        },
+        "resistance_levels": {
+            "value": [],
+            "source": "",
+            "allowed_sources": ["Primary Timeframe swing high", "Primary Timeframe EMA", "VWAP"],
+            "description": "阻力线只能来源于允许的列表，禁止虚拟或 ATR 生成"
+        }
       },
-      "Output Constraints": {
+      "Output_Constraints": {
         "required_fields": ["trend_analyzer", "trading_signal", "risk_metrics"],
         "position_adjustment": "仅对已有仓位生效",
-        "data_consistency": "不得输出矛盾信息，不输出 enum/description/calculation_method"
+        "data_consistency": "不得输出矛盾信息",
+        "forbidden_fields": ["enum", "description", "calculation_method", "notes", "allowed_sources", "usage"]
       }
     }
 
@@ -103,11 +133,16 @@
               "resistance_levels": []
             },
             "decision_gate": {
-              "value": null, 
-              "enum": ["NO_TRADE", "TRADE"]
+              "value": null,
+              "enum": ["NO_TRADE", "TRADE"],
               "reason_code": {
                 "value": [],
-                "enum": [
+                "TRADE_REASON_CODES": [
+                  "CONFIDENCE_HIGH",
+                  "RISK_REWARD_HIGH",
+                  "TREND_STRUCTURE_STRONG"
+                ],
+                "NO_TRADE_REASON_CODES": [
                   "RISK_REWARD_LOW",
                   "OVERBOUGHT",
                   "OVERSOLD",
