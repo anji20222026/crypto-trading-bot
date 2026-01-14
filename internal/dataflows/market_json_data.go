@@ -45,9 +45,9 @@ type IndicatorsData struct {
 	MACD float64             `json:"MACD"`
 	RSI  map[string]float64  `json:"RSI"` // Key: period (e.g., "7", "14")
 	ADX  float64             `json:"ADX"`
-	BB   map[string]*BBBands `json:"BB"`  // Key: timeframe (e.g., "15m")
-	ATR  map[string]float64  `json:"ATR"` // Key: period (e.g., "3", "7", "14")
-	VWAP *VWAPData           `json:"VWAP"`
+	BB   map[string]*BBBands `json:"BB"` // Key: timeframe (e.g., "15m")
+
+	VWAP *VWAPData `json:"VWAP"`
 }
 
 // BBBands represents upper and lower Bollinger Bands
@@ -336,12 +336,12 @@ func buildIndicatorsData(ohlcvData []OHLCV, indicators *TechnicalIndicators, tim
 	}
 
 	// Build ATR map
-	// 构建 ATR 映射
-	atrMap := map[string]float64{
-		"3":  round2(getLastValue(indicators.ATR_3)),
-		"7":  round2(getLastValue(indicators.ATR_7)),
-		"14": round2(getLastValue(indicators.ATR_14)),
-	}
+	// 构建 ATR 映射,不要影响趋势
+	// atrMap := map[string]float64{
+	// 	"3":  round2(getLastValue(indicators.ATR_3)),
+	// 	"7":  round2(getLastValue(indicators.ATR_7)),
+	// 	"14": round2(getLastValue(indicators.ATR_14)),
+	// }
 
 	// Build BB data (last 10 values)
 	// 构建布林带数据（最后 10 个值）
@@ -366,7 +366,7 @@ func buildIndicatorsData(ohlcvData []OHLCV, indicators *TechnicalIndicators, tim
 		RSI:  rsiMap,
 		ADX:  round2(getLastValue(indicators.ADX)),
 		BB:   bbData,
-		ATR:  atrMap,
+
 		VWAP: vwapData,
 	}
 }
@@ -378,6 +378,8 @@ func buildVolumeData(ohlcvData []OHLCV, timeframe string) *VolumeData {
 		return &VolumeData{}
 	}
 
+	// GetOHLCV already excludes the last incomplete candle
+	// GetOHLCV 已经排除了最后一根未完成的K线
 	lastIdx := len(ohlcvData) - 1
 	currentVolume := ohlcvData[lastIdx].Volume
 
@@ -614,9 +616,9 @@ func buildLongTermData(longerOHLCV []OHLCV, longerIndicators *TechnicalIndicator
 			"50": round2(getLastValue(longerIndicators.EMA_50)),
 		},
 		ATR: map[string]float64{
-			"3":  round2(getLastValue(longerIndicators.ATR_3)),
-			"7":  round2(getLastValue(longerIndicators.ATR_7)),
-			"14": round2(getLastValue(longerIndicators.ATR_14)),
+			// "3":  round2(getLastValue(longerIndicators.ATR_3)),
+			"7": round2(getLastValue(longerIndicators.ATR_7)),
+			// "14": round2(getLastValue(longerIndicators.ATR_14)),
 		},
 		MACD:   roundSlice2(getLastNValues(longerIndicators.MACD, 10)),
 		RSI14:  roundSlice2(getLastNValues(longerIndicators.RSI, 10)),

@@ -116,6 +116,10 @@ func NewMarketData(cfg *config.Config) *MarketData {
 }
 
 // GetOHLCV fetches OHLCV data for a symbol
+// Note: ALWAYS excludes the last candle to ensure only completed candles are returned
+// 注意：始终排除最后一根K线，确保只返回已完成的K线
+// This guarantees 100% data certainty for all technical indicator calculations
+// 这保证了所有技术指标计算的100%数据确定性
 func (m *MarketData) GetOHLCV(ctx context.Context, symbol string, timeframe string, lookbackDays int) ([]OHLCV, error) {
 	interval := convertTimeframe(timeframe)
 
@@ -132,6 +136,14 @@ func (m *MarketData) GetOHLCV(ctx context.Context, symbol string, timeframe stri
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch klines: %w", err)
+	}
+
+	// Always remove the last candle to ensure we only use completed candles
+	// 始终移除最后一根K线，确保只使用已完成的K线
+	// This guarantees data stability and eliminates any ambiguity about candle completion status
+	// 这保证了数据稳定性，消除了关于K线是否完成的任何模糊性
+	if len(klines) > 0 {
+		klines = klines[:len(klines)-1]
 	}
 
 	ohlcvData := make([]OHLCV, 0, len(klines))

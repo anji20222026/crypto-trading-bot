@@ -81,10 +81,6 @@ func TestMarketJSONDataStructure(t *testing.T) {
 		t.Error("RSI 缺少 14 期数据")
 	}
 
-	if len(indicatorsData.ATR) == 0 {
-		t.Error("ATR 数据为空")
-	}
-
 	if math.IsNaN(indicatorsData.MACD) {
 		t.Error("MACD 不应为 NaN")
 	}
@@ -361,10 +357,6 @@ func TestBuildMarketJSONData(t *testing.T) {
 		t.Error("RSI 数据为空")
 	}
 
-	if len(jsonData.Indicators.ATR) == 0 {
-		t.Error("ATR 数据为空")
-	}
-
 	// Verify VWAP
 	// 验证 VWAP
 	if jsonData.Indicators.VWAP == nil {
@@ -520,11 +512,6 @@ func TestCompleteJSONFormat(t *testing.T) {
 					"14": 48.5,
 				},
 				ADX: 25.3,
-				ATR: map[string]float64{
-					"3":  450.0,
-					"7":  520.0,
-					"14": 580.0,
-				},
 			},
 			Volume: &VolumeData{
 				Current:   1250000,

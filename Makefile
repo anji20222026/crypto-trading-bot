@@ -1,4 +1,4 @@
-.PHONY: build run clean test help query build-web run-web demo test-json
+.PHONY: build run clean test help query build-web run-web demo test-json test-binance-json
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -73,6 +73,17 @@ test-json:
 	@echo "🚀 运行测试..."
 	@./$(BUILD_DIR)/$(TEST_JSON_BINARY)
 
+## test-binance-json: 从币安 API 获取真实数据并生成完整 JSON
+test-binance-json:
+	@echo "🚀 从币安 API 获取数据并生成完整 JSON..."
+	@go test -v -run TestBinanceGenerateCompleteJSON ./internal/dataflows/
+	@echo ""
+	@if [ -f internal/dataflows/binance_market_data_output.json ]; then \
+		echo "📊 生成的 JSON 文件位置: internal/dataflows/binance_market_data_output.json"; \
+		echo "📈 查看 Schema: jq '.schema' internal/dataflows/binance_market_data_output.json"; \
+		echo "📈 查看数据: jq '.data' internal/dataflows/binance_market_data_output.json"; \
+	fi
+
 ## clean: 清理编译产物
 clean:
 	@echo "🧹 清理编译产物..."
@@ -138,5 +149,6 @@ help: Makefile
 	@sed -n 's/^##//p' $< | column -t -s ':' |  sed -e 's/^/ /'
 	@echo ""
 	@echo "💡 提示:"
-	@echo "   - 使用 'make test-json' 查看发送给 LLM 的 JSON 格式"
+	@echo "   - 使用 'make test-json' 查看发送给 LLM 的 JSON 格式（模拟数据）"
+	@echo "   - 使用 'make test-binance-json' 从币安 API 获取真实数据并生成 JSON"
 	@echo "   - 使用 'make demo' 查看市场数据结构"

@@ -52,6 +52,107 @@ type TradeDecision struct {
 	StopLossReason    *string  `json:"stop_loss_reason,omitempty"`    // 止损调整理由 (仅HOLD调整时) / Stop loss reason (HOLD adjustment only)
 }
 
+// TradingPairsResponse represents the new response format with trading_pairs structure
+// TradingPairsResponse 表示新的 trading_pairs 结构响应格式
+type TradingPairsResponse struct {
+	TradingPairs map[string]*SymbolDecision `json:"trading_pairs"` // 交易对决策映射 / Trading pairs decision map
+}
+
+// SymbolDecision represents a single symbol's complete decision structure
+// SymbolDecision 表示单个交易对的完整决策结构
+type SymbolDecision struct {
+	TrendAnalyzer        *TrendAnalyzer        `json:"trend_analyzer"`                // 趋势分析 / Trend analysis
+	ConfidenceToLeverage *ConfidenceToLeverage `json:"confidence_to_leverage"`        // 置信度与杠杆 / Confidence and leverage
+	RiskMetrics          *RiskMetrics          `json:"risk_metrics"`                  // 风险指标 / Risk metrics
+	DecisionGate         *DecisionGate         `json:"decision_gate"`                 // 决策门 / Decision gate
+	TradingSignal        *TradingSignal        `json:"trading_signal"`                // 交易信号 / Trading signal
+	PositionAdjustment   *PositionAdjustment   `json:"position_adjustment,omitempty"` // 仓位调整 / Position adjustment
+}
+
+// TrendAnalyzer represents trend analysis data
+// TrendAnalyzer 表示趋势分析数据
+type TrendAnalyzer struct {
+	Trend *EnumValue `json:"trend"` // 趋势方向 / Trend direction
+	Phase *EnumValue `json:"phase"` // 趋势阶段 / Trend phase
+	Risk  *EnumValue `json:"risk"`  // 风险等级 / Risk level
+}
+
+// ConfidenceToLeverage represents confidence and leverage mapping
+// ConfidenceToLeverage 表示置信度与杠杆映射
+type ConfidenceToLeverage struct {
+	Confidence *ValueOnly     `json:"confidence"` // 置信度 / Confidence
+	Leverage   *LeverageValue `json:"leverage"`   // 杠杆 / Leverage
+}
+
+// RiskMetrics represents risk-related metrics
+// RiskMetrics 表示风险相关指标
+type RiskMetrics struct {
+	ATR                 *ATRValue  `json:"ATR"`                   // ATR 指标 / ATR indicator
+	StopLoss            *ValueOnly `json:"stop_loss"`             // 止损价格 / Stop loss price
+	TakeProfit          *ValueOnly `json:"take_profit"`           // 止盈价格 / Take profit price
+	EstimatedRiskReward *ValueOnly `json:"estimated_risk_reward"` // 预估盈亏比 / Estimated risk/reward
+	SupportLevels       []float64  `json:"support_levels"`        // 支撑位 / Support levels
+	ResistanceLevels    []float64  `json:"resistance_levels"`     // 阻力位 / Resistance levels
+}
+
+// DecisionGate represents the decision gate
+// DecisionGate 表示决策门
+type DecisionGate struct {
+	Value      string      `json:"value"`       // 决策值 / Decision value
+	ReasonCode *ReasonCode `json:"reason_code"` // 原因代码 / Reason code
+}
+
+// TradingSignal represents the trading signal
+// TradingSignal 表示交易信号
+type TradingSignal struct {
+	Action       *EnumValue `json:"action"`        // 交易动作 / Trading action
+	StopLoss     float64    `json:"stop_loss"`     // 止损价格 / Stop loss price
+	TakeProfit   float64    `json:"take_profit"`   // 止盈价格 / Take profit price
+	PositionSize float64    `json:"position_size"` // 仓位大小 / Position size
+	Reasoning    string     `json:"reasoning"`     // 理由 / Reasoning
+}
+
+// PositionAdjustment represents position adjustment data
+// PositionAdjustment 表示仓位调整数据
+type PositionAdjustment struct {
+	Action               *EnumValue `json:"action"`                 // 调整动作 / Adjustment action
+	StopLossAdjustment   *ValueOnly `json:"stop_loss_adjustment"`   // 止损调整 / Stop loss adjustment
+	TakeProfitAdjustment *ValueOnly `json:"take_profit_adjustment"` // 止盈调整 / Take profit adjustment
+	Reasoning            string     `json:"reasoning"`              // 理由 / Reasoning
+}
+
+// EnumValue represents a value with enum constraint
+// EnumValue 表示带枚举约束的值
+type EnumValue struct {
+	Value string `json:"value"` // 值 / Value
+}
+
+// ValueOnly represents a simple value wrapper
+// ValueOnly 表示简单值包装器
+type ValueOnly struct {
+	Value float64 `json:"value"` // 值 / Value
+}
+
+// LeverageValue represents leverage with min/max constraints
+// LeverageValue 表示带最小/最大约束的杠杆值
+type LeverageValue struct {
+	Value int `json:"value"` // 值 / Value
+	Min   int `json:"min"`   // 最小值 / Minimum value
+	Max   int `json:"max"`   // 最大值 / Maximum value
+}
+
+// ATRValue represents ATR indicator data
+// ATRValue 表示 ATR 指标数据
+type ATRValue struct {
+	Value float64 `json:"value"` // 值 / Value
+}
+
+// ReasonCode represents reason codes for decision gate
+// ReasonCode 表示决策门的原因代码
+type ReasonCode struct {
+	Value []string `json:"value"` // 原因代码列表 / Reason code list
+}
+
 // AgentState holds the state of all analysts' reports for multiple symbols
 // AgentState 保存所有分析师对多个交易对的报告状态
 type AgentState struct {
@@ -878,10 +979,8 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 			ResponseFormat: &openaiComponent.ChatCompletionResponseFormat{
 				Type: openaiComponent.ChatCompletionResponseFormatTypeJSONSchema,
 				JSONSchema: &openaiComponent.ChatCompletionResponseFormatJSONSchema{
-					Name:        "trade_decision",
-					Description: "加密货币交易决策结构化输出",
-					JSONSchema:  jsonSchemaObj, // 使用 JSONSchema 字段而不是 Schema
-					Strict:      false,         // eino-contrib/jsonschema 生成的 Schema 可能不完全兼容 strict 模式
+					JSONSchema: jsonSchemaObj, // 使用 JSONSchema 字段而不是 Schema
+					Strict:     false,         // eino-contrib/jsonschema 生成的 Schema 可能不完全兼容 strict 模式
 				},
 			},
 		}
@@ -910,51 +1009,27 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	}
 	g.state.mu.RUnlock()
 
-	// Load instructions from prompt file
-	// 从 Prompt 文件加载指令
-	promptFileContent := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
+	// Load system prompt from file (complete prompt with instructions and output schema)
+	// 从文件加载系统 Prompt（包含完整的 instructions 和输出 schema）
+	systemPrompt := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
 
-	// Extract instructions from JSON if the prompt file is in JSON format
-	// 如果 Prompt 文件是 JSON 格式，提取 instructions 字段
-	var instructions string
-	var promptJSON map[string]interface{}
-	parseErr := sonic.UnmarshalString(promptFileContent, &promptJSON)
-	if parseErr == nil {
-		// Successfully parsed as JSON, extract "instructions"
-		// 成功解析为 JSON，提取 "instructions"
-		if inst, ok := promptJSON["instructions"].(string); ok {
-			instructions = inst
-		} else {
-			instructions = promptFileContent
-		}
-	} else {
-		// Not JSON, use whole content
-		// 不是 JSON，使用整个内容
-		instructions = promptFileContent
-	}
-
-	// Build final JSON: {instructions, schema, data}
-	// 构建最终 JSON：{instructions, schema, data}
-	finalJSON := map[string]interface{}{
-		"instructions": instructions,
-		"schema":       marketJSONData.Schema,
-		"data":         marketJSONData.Data,
+	// Build user prompt with market data schema and data
+	// 构建用户 Prompt，包含市场数据 schema 和 data
+	userDataJSON := map[string]interface{}{
+		"schema": marketJSONData.Schema, // 市场数据的 schema（字段说明）
+		"data":   marketJSONData.Data,   // 实际的市场数据
 	}
 
 	// Convert to JSON string
 	// 转换为 JSON 字符串
-	jsonBytes, err := sonic.MarshalIndent(finalJSON, "", "  ")
+	jsonBytes, err := sonic.MarshalIndent(userDataJSON, "", "  ")
 	if err != nil {
 		g.logger.Warning(fmt.Sprintf("JSON 序列化失败: %v，使用简单规则决策", err))
 		return g.makeSimpleDecision(), nil
 	}
 
-	// System prompt is simple instruction
-	// 系统 Prompt 是简单的指令
-	systemPrompt := "你是专业的加密货币趋势交易分析师。请严格按照提供的 JSON 中的 instructions 和 schema 进行分析，并输出符合要求的 JSON 格式结果。"
-
-	// User prompt is the complete JSON
-	// 用户 Prompt 是完整的 JSON
+	// User prompt is the market data with schema
+	// 用户 Prompt 是带 schema 的市场数据
 	userPrompt := string(jsonBytes)
 
 	// Create messages
@@ -976,18 +1051,6 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	g.logger.Info(fmt.Sprintf("系统提示词长度: %d 字符", len(systemPrompt)))
 	g.logger.Info(fmt.Sprintf("用户数据长度: %d 字符", len(userPrompt)))
 
-	// Log system prompt (first 500 chars)
-	// 记录系统提示词（前 500 字符）
-	systemPreview := systemPrompt
-	if len(systemPreview) > 500 {
-		systemPreview = systemPreview[:500] + "..."
-	}
-	g.logger.Info(fmt.Sprintf("系统提示词预览:\n%s", systemPreview))
-
-	// Log user data (market JSON) - show structure
-	// 记录用户数据（市场 JSON）- 显示结构
-	g.logger.Info(fmt.Sprintf("市场数据 JSON 预览:\n%s", userPrompt[:min(len(userPrompt), 1000)]+"..."))
-
 	// Count symbols in market data
 	// 统计市场数据中的交易对数量
 	symbolCount := len(marketJSONData.Data)
@@ -995,6 +1058,34 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	for symbol := range marketJSONData.Data {
 		g.logger.Info(fmt.Sprintf("  - %s", symbol))
 	}
+
+	// Save complete request to LLM log file (not printed to console)
+	// 保存完整请求到 LLM 日志文件（不打印到控制台）
+	requestLog := fmt.Sprintf(`📤 完整 LLM 请求
+================================================================================
+时间: %s
+模型: %s
+模式: %s
+后端: %s
+
+系统提示词 (System Prompt):
+--------------------------------------------------------------------------------
+%s
+
+用户数据 (User Prompt - Schema + Data):
+--------------------------------------------------------------------------------
+%s
+
+================================================================================
+`, time.Now().Format("2006-01-02 15:04:05"), g.config.QuickThinkLLM, modeStr, g.config.BackendURL, systemPrompt, userPrompt)
+
+	// Use a counter to track request number (simple increment)
+	// 使用计数器跟踪请求编号（简单递增）
+	g.mu.Lock()
+	requestNum := g.tradeCount + 1
+	g.mu.Unlock()
+
+	g.logger.SaveLLMRequest(requestLog, requestNum)
 
 	// Call LLM
 	// 调用 LLM
@@ -1012,103 +1103,112 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 
 	// Log token usage if available
 	// 记录 token 使用情况
+	var tokenInfo string
 	if response.ResponseMeta != nil && response.ResponseMeta.Usage != nil {
-		g.logger.Info(fmt.Sprintf("Token 使用: %d (输入: %d, 输出: %d)",
+		tokenInfo = fmt.Sprintf("Token 使用: %d (输入: %d, 输出: %d)",
 			response.ResponseMeta.Usage.TotalTokens,
 			response.ResponseMeta.Usage.PromptTokens,
-			response.ResponseMeta.Usage.CompletionTokens))
+			response.ResponseMeta.Usage.CompletionTokens)
+		g.logger.Info(tokenInfo)
 	}
 
 	// Log response content length
 	// 记录响应内容长度
 	g.logger.Info(fmt.Sprintf("响应内容长度: %d 字符", len(response.Content)))
 
-	// Log full response content
-	// 记录完整响应内容
-	g.logger.Info("完整响应内容:")
-	g.logger.Info(fmt.Sprintf("%s", response.Content))
+	// Save complete response to LLM log file (not printed to console)
+	// 保存完整响应到 LLM 日志文件（不打印到控制台）
+	responseLog := fmt.Sprintf(`📥 完整 LLM 响应
+================================================================================
+时间: %s
+%s
+响应长度: %d 字符
 
-	// Parse JSON response (support both multi-symbol map and single-object formats)
-	// 解析 JSON 响应（支持多币种映射和单对象两种格式）
+响应内容:
+--------------------------------------------------------------------------------
+%s
+
+================================================================================
+`, time.Now().Format("2006-01-02 15:04:05"), tokenInfo, len(response.Content), response.Content)
+
+	g.logger.SaveLLMResponse(responseLog, requestNum)
+
+	// Parse JSON response (support multiple formats)
+	// 解析 JSON 响应（支持多种格式）
 	g.logger.Header("🔍 解析 LLM 响应", '-', 80)
-
-	var sample TradeDecision
-	parsed := false
 
 	cleanContent := extractJSONPayload(response.Content)
 	trimmed := strings.TrimSpace(cleanContent)
 
 	g.logger.Info(fmt.Sprintf("清理后的 JSON 长度: %d 字符", len(trimmed)))
 
-	// Try multi-symbol format: map[string]TradeDecision
-	// 优先尝试多币种格式：map[string]TradeDecision
+	// Try to parse as TradingPairsResponse (new format with trading_pairs structure)
+	// 尝试解析为 TradingPairsResponse（新格式，包含 trading_pairs 结构）
+	var tradingPairsResp TradingPairsResponse
+	if err := sonic.Unmarshal([]byte(trimmed), &tradingPairsResp); err == nil && len(tradingPairsResp.TradingPairs) > 0 {
+		g.logger.Success(fmt.Sprintf("✅ 成功解析为 trading_pairs 格式，包含 %d 个交易对", len(tradingPairsResp.TradingPairs)))
+
+		// Convert TradingPairsResponse to legacy format for backward compatibility
+		// 将 TradingPairsResponse 转换为旧格式以保持向后兼容
+		convertedJSON, err := convertTradingPairsToLegacyFormat(tradingPairsResp.TradingPairs, g.logger)
+		if err != nil {
+			g.logger.Warning(fmt.Sprintf("转换 trading_pairs 格式失败: %v", err))
+			return g.makeSimpleDecision(), nil
+		}
+
+		// Log converted decisions
+		// 记录转换后的决策
+		for symbol, decision := range convertedJSON {
+			g.logger.Info(fmt.Sprintf("  - %s: Action=%s, Confidence=%.2f, Leverage=%d",
+				symbol, decision.Action, decision.Confidence, decision.Leverage))
+		}
+
+		// Convert back to JSON string for return
+		// 转换回 JSON 字符串以返回
+		convertedBytes, err := sonic.MarshalIndent(convertedJSON, "", "  ")
+		if err != nil {
+			g.logger.Warning(fmt.Sprintf("序列化转换后的决策失败: %v", err))
+			return g.makeSimpleDecision(), nil
+		}
+
+		return string(convertedBytes), nil
+	}
+
+	// Fallback: Try multi-symbol format: map[string]TradeDecision
+	// 回退：尝试多币种格式：map[string]TradeDecision
 	var multi map[string]TradeDecision
 	if err := sonic.Unmarshal([]byte(trimmed), &multi); err == nil && len(multi) > 0 {
-		g.logger.Success(fmt.Sprintf("✅ 成功解析为多交易对格式，包含 %d 个交易对", len(multi)))
+		g.logger.Success(fmt.Sprintf("✅ 成功解析为多交易对格式（旧格式），包含 %d 个交易对", len(multi)))
 		for sym, d := range multi {
 			g.logger.Info(fmt.Sprintf("  - %s: Action=%s, Confidence=%.2f, Leverage=%d",
 				sym, d.Action, d.Confidence, d.Leverage))
-			sample = d
-			// If symbol field is empty, use map key as fallback
-			// 如果结构体中未填 symbol，则使用 map 的键作为回退
-			if sample.Symbol == "" {
-				sample.Symbol = sym
+			// Validate at least one decision
+			// 至少验证一个决策
+			if strings.TrimSpace(d.Action) == "" || strings.TrimSpace(d.Symbol) == "" {
+				if d.Symbol == "" {
+					d.Symbol = sym
+				}
 			}
-			parsed = true
-			break
 		}
-	} else {
-		// Fallback: single-object format
-		// 回退到单对象格式
-		g.logger.Info("尝试解析为单交易对格式...")
-		var single TradeDecision
-		if err := sonic.Unmarshal([]byte(trimmed), &single); err == nil {
-			g.logger.Success("✅ 成功解析为单交易对格式")
-			sample = single
-			parsed = true
-		} else {
-			g.logger.Warning(fmt.Sprintf("单交易对格式解析失败: %v", err))
-		}
+		return response.Content, nil
 	}
 
-	if !parsed {
-		g.logger.Warning(fmt.Sprintf("❌ JSON 解析失败，原始响应: %s", response.Content))
-		g.logger.Warning("降级到简单规则决策")
-		return g.makeSimpleDecision(), nil
+	// Fallback: single-object format
+	// 回退到单对象格式
+	g.logger.Info("尝试解析为单交易对格式...")
+	var single TradeDecision
+	if err := sonic.Unmarshal([]byte(trimmed), &single); err == nil && single.Symbol != "" {
+		g.logger.Success("✅ 成功解析为单交易对格式")
+		g.logger.Info(fmt.Sprintf("  - %s: Action=%s, Confidence=%.2f, Leverage=%d",
+			single.Symbol, single.Action, single.Confidence, single.Leverage))
+		return response.Content, nil
 	}
 
-	// Validate required fields on sample decision
-	// 对示例决策验证必填字段
-	if strings.TrimSpace(sample.Action) == "" || strings.TrimSpace(sample.Symbol) == "" {
-		g.logger.Warning(fmt.Sprintf("❌ LLM 返回的 JSON 缺少必填字段 (action或symbol为空)，示例: %+v", sample))
-		g.logger.Warning(fmt.Sprintf("原始响应内容:\n%s", response.Content))
-		return g.makeSimpleDecision(), nil
-	}
-
-	// Log parsed decision info
-	// 记录解析后的示例决策信息
-	g.logger.Header("📊 决策结果", '-', 80)
-	g.logger.Info(fmt.Sprintf("交易对: %s", sample.Symbol))
-	g.logger.Info(fmt.Sprintf("操作: %s", sample.Action))
-	g.logger.Info(fmt.Sprintf("置信度: %.2f", sample.Confidence))
-	g.logger.Info(fmt.Sprintf("杠杆: %d", sample.Leverage))
-	if sample.StopLoss > 0 {
-		g.logger.Info(fmt.Sprintf("止损: %.2f", sample.StopLoss))
-	}
-	if sample.PositionSize > 0 {
-		g.logger.Info(fmt.Sprintf("仓位: %.2f%%", sample.PositionSize))
-	}
-	if sample.RiskRewardRatio > 0 {
-		g.logger.Info(fmt.Sprintf("盈亏比: %.2f", sample.RiskRewardRatio))
-	}
-	if sample.Reasoning != "" {
-		g.logger.Info(fmt.Sprintf("理由: %s", sample.Reasoning))
-	}
-
-	// Return both JSON and formatted text for backward compatibility
-	// 为了向后兼容，返回 JSON 原文（也可以格式化为文本）
-	// TODO: 可以选择格式化为可读文本，或直接返回 JSON 供后续处理
-	return response.Content, nil
+	// All parsing attempts failed
+	// 所有解析尝试都失败
+	g.logger.Warning(fmt.Sprintf("❌ JSON 解析失败，原始响应: %s", response.Content))
+	g.logger.Warning("降级到简单规则决策")
+	return g.makeSimpleDecision(), nil
 }
 
 // Run executes the trading graph
@@ -1180,4 +1280,135 @@ func formatLargeNumber(value float64) string {
 	}
 
 	return formatted
+}
+
+// convertTradingPairsToLegacyFormat converts TradingPairsResponse to legacy map[string]TradeDecision format
+// convertTradingPairsToLegacyFormat 将 TradingPairsResponse 转换为旧的 map[string]TradeDecision 格式
+func convertTradingPairsToLegacyFormat(tradingPairs map[string]*SymbolDecision, log *logger.ColorLogger) (map[string]TradeDecision, error) {
+	result := make(map[string]TradeDecision)
+
+	for symbol, decision := range tradingPairs {
+		if decision == nil {
+			log.Warning(fmt.Sprintf("交易对 %s 的决策为空，跳过", symbol))
+			continue
+		}
+
+		// Extract action from trading_signal
+		// 从 trading_signal 提取动作
+		action := "HOLD"
+		if decision.TradingSignal != nil && decision.TradingSignal.Action != nil {
+			action = decision.TradingSignal.Action.Value
+		}
+
+		// Extract confidence from confidence_to_leverage
+		// 从 confidence_to_leverage 提取置信度
+		confidence := 0.5
+		if decision.ConfidenceToLeverage != nil && decision.ConfidenceToLeverage.Confidence != nil {
+			confidence = decision.ConfidenceToLeverage.Confidence.Value
+		}
+
+		// Extract leverage from confidence_to_leverage
+		// 从 confidence_to_leverage 提取杠杆
+		leverage := 1
+		if decision.ConfidenceToLeverage != nil && decision.ConfidenceToLeverage.Leverage != nil {
+			leverage = decision.ConfidenceToLeverage.Leverage.Value
+		}
+
+		// Extract position size from trading_signal
+		// 从 trading_signal 提取仓位大小
+		positionSize := 0.0
+		if decision.TradingSignal != nil {
+			positionSize = decision.TradingSignal.PositionSize
+		}
+
+		// Extract stop loss from trading_signal or risk_metrics
+		// 从 trading_signal 或 risk_metrics 提取止损
+		stopLoss := 0.0
+		if decision.TradingSignal != nil && decision.TradingSignal.StopLoss > 0 {
+			stopLoss = decision.TradingSignal.StopLoss
+		} else if decision.RiskMetrics != nil && decision.RiskMetrics.StopLoss != nil {
+			stopLoss = decision.RiskMetrics.StopLoss.Value
+		}
+
+		// Check for position adjustment stop loss (for HOLD actions)
+		// 检查仓位调整止损（用于 HOLD 动作）
+		var newStopLoss *float64
+		var stopLossReason *string
+		if decision.PositionAdjustment != nil {
+			if decision.PositionAdjustment.StopLossAdjustment != nil && decision.PositionAdjustment.StopLossAdjustment.Value > 0 {
+				val := decision.PositionAdjustment.StopLossAdjustment.Value
+				newStopLoss = &val
+			}
+			if decision.PositionAdjustment.Reasoning != "" {
+				reason := decision.PositionAdjustment.Reasoning
+				stopLossReason = &reason
+			}
+		}
+
+		// Extract reasoning from trading_signal
+		// 从 trading_signal 提取理由
+		reasoning := ""
+		if decision.TradingSignal != nil {
+			reasoning = decision.TradingSignal.Reasoning
+		}
+
+		// Extract risk/reward ratio from risk_metrics
+		// 从 risk_metrics 提取盈亏比
+		riskRewardRatio := 0.0
+		if decision.RiskMetrics != nil && decision.RiskMetrics.EstimatedRiskReward != nil {
+			riskRewardRatio = decision.RiskMetrics.EstimatedRiskReward.Value
+		}
+
+		// Build summary from trend analyzer and decision gate
+		// 从趋势分析器和决策门构建总结
+		summary := ""
+		if decision.TrendAnalyzer != nil {
+			trend := "UNKNOWN"
+			phase := "UNKNOWN"
+			risk := "UNKNOWN"
+			if decision.TrendAnalyzer.Trend != nil {
+				trend = decision.TrendAnalyzer.Trend.Value
+			}
+			if decision.TrendAnalyzer.Phase != nil {
+				phase = decision.TrendAnalyzer.Phase.Value
+			}
+			if decision.TrendAnalyzer.Risk != nil {
+				risk = decision.TrendAnalyzer.Risk.Value
+			}
+			summary = fmt.Sprintf("趋势:%s 阶段:%s 风险:%s", trend, phase, risk)
+		}
+
+		// Add decision gate info to summary
+		// 将决策门信息添加到总结
+		if decision.DecisionGate != nil {
+			summary += fmt.Sprintf(" 决策:%s", decision.DecisionGate.Value)
+			if decision.DecisionGate.ReasonCode != nil && len(decision.DecisionGate.ReasonCode.Value) > 0 {
+				summary += fmt.Sprintf(" 原因:%v", decision.DecisionGate.ReasonCode.Value)
+			}
+		}
+
+		// Create TradeDecision
+		// 创建 TradeDecision
+		tradeDecision := TradeDecision{
+			Symbol:          symbol,
+			Action:          action,
+			Confidence:      confidence,
+			Leverage:        leverage,
+			PositionSize:    positionSize,
+			StopLoss:        stopLoss,
+			Reasoning:       reasoning,
+			RiskRewardRatio: riskRewardRatio,
+			Summary:         summary,
+			NewStopLoss:     newStopLoss,
+			StopLossReason:  stopLossReason,
+		}
+
+		result[symbol] = tradeDecision
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("没有成功转换任何交易对决策")
+	}
+
+	return result, nil
 }
