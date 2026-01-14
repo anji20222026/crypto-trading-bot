@@ -38,7 +38,64 @@ func main() {
 	if len(cfg.CryptoSymbols) == 0 {
 		log.Fatal("❌ 配置中没有交易对")
 	}
+	for _, symbol := range cfg.CryptoSymbols {
 
+		binanceSymbol := cfg.GetBinanceSymbolFor(symbol)
+
+		fmt.Printf("📊 正在获取 %s 的市场数据...\n", symbol)
+		fmt.Println()
+		// Fetch OHLCV data for primary timeframe
+		// 获取主时间周期的 OHLCV 数据
+		fmt.Printf("   🔄 获取 %s OHLCV 数据...\n", cfg.CryptoTimeframe)
+		ohlcvData, err := marketData.GetOHLCV(ctx, binanceSymbol, cfg.CryptoTimeframe, cfg.CryptoLookbackDays)
+		if err != nil {
+			log.Fatalf("❌ OHLCV 数据获取失败: %v", err)
+		}
+		fmt.Printf("   ✅ 获取到 %d 条 K 线数据\n", len(ohlcvData))
+
+		// Calculate indicators
+		// 计算技术指标
+		fmt.Printf("   🔄 计算技术指标...\n")
+		indicators := dataflows.CalculateIndicators(ohlcvData)
+		fmt.Printf("   ✅ 技术指标计算完成\n")
+
+		// Fetch longer timeframe data if enabled
+		// 如果启用，获取更长期时间周期数据
+		var longerOHLCV []dataflows.OHLCV
+		var longerIndicators *dataflows.TechnicalIndicators
+
+		if cfg.EnableMultiTimeframe {
+			fmt.Printf("   🔄 获取 %s OHLCV 数据...\n", cfg.CryptoLongerTimeframe)
+			longerOHLCV, err = marketData.GetOHLCV(ctx, binanceSymbol, cfg.CryptoLongerTimeframe, cfg.CryptoLongerLookbackDays)
+			if err != nil {
+				log.Printf("   ⚠️  长期数据获取失败: %v", err)
+			} else {
+				fmt.Printf("   ✅ 获取到 %d 条长期 K 线数据\n", len(longerOHLCV))
+				longerIndicators = dataflows.CalculateIndicators(longerOHLCV)
+			}
+		}
+		// Build structured JSON data
+		// 构建结构化 JSON 数据
+		fmt.Println()
+		fmt.Printf("🔧 正在构建结构化市场数据...\n")
+		jsonData, err := dataflows.BuildMarketJSONData(
+			ctx,
+			marketData,
+			binanceSymbol,
+			cfg.CryptoTimeframe,
+			ohlcvData,
+			indicators,
+			longerIndicators,
+			longerOHLCV,
+		)
+		if err != nil {
+			log.Fatalf("❌ 结构化数据构建失败: %v", err)
+		}
+		fmt.Printf("✅ 结构化数据构建完成\n")
+		fmt.Println()
+		fmt.Println(jsonData)
+
+	}
 	symbol := cfg.CryptoSymbols[0]
 	binanceSymbol := cfg.GetBinanceSymbolFor(symbol)
 

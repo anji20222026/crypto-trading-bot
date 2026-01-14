@@ -98,8 +98,8 @@ func TestMarketJSONDataStructure(t *testing.T) {
 	if indicatorsData.BB == nil {
 		t.Error("BB 不应为 nil")
 	} else {
-		if len(indicatorsData.BB.Timeframe) == 0 {
-			t.Error("BB Timeframe 数据为空")
+		if len(indicatorsData.BB) == 0 {
+			t.Error("BB 数据为空")
 		}
 	}
 
@@ -114,8 +114,16 @@ func TestMarketJSONDataStructure(t *testing.T) {
 		t.Error("当前成交量应该大于 0")
 	}
 
-	if volumeData.Average <= 0 {
-		t.Error("平均成交量应该大于 0")
+	if volumeData.Average7 <= 0 {
+		t.Error("7 周期平均成交量应该大于 0")
+	}
+
+	if volumeData.Average14 <= 0 {
+		t.Error("14 周期平均成交量应该大于 0")
+	}
+
+	if volumeData.Average20 <= 0 {
+		t.Error("20 周期平均成交量应该大于 0")
 	}
 
 	// Build price history
@@ -127,10 +135,6 @@ func TestMarketJSONDataStructure(t *testing.T) {
 
 	if len(priceHistory.TF15m.Mid) == 0 {
 		t.Error("15m 价格历史为空")
-	}
-
-	if len(priceHistory.TF1h.Mid) == 0 {
-		t.Error("1h 价格历史为空")
 	}
 
 	// Build indicator history
@@ -416,3 +420,182 @@ func TestBuildMarketJSONData(t *testing.T) {
 	t.Logf("✅ 所有数据验证通过")
 }
 
+// TestGetDefaultSchema tests the GetDefaultSchema function
+// TestGetDefaultSchema 测试 GetDefaultSchema 函数
+func TestGetDefaultSchema(t *testing.T) {
+	schema := GetDefaultSchema()
+
+	if schema == nil {
+		t.Fatal("Schema 不应为 nil")
+	}
+
+	// Verify all required fields are present
+	// 验证所有必需字段都存在
+	requiredFields := []string{
+		"VWAP",
+		"multi_tf",
+		"long_term_1h",
+		"price_history",
+		"BB",
+		"current_position",
+	}
+
+	for _, field := range requiredFields {
+		if _, ok := schema[field]; !ok {
+			t.Errorf("Schema 缺少必需字段: %s", field)
+		}
+	}
+
+	// Verify field descriptions
+	// 验证字段描述
+	if schema["VWAP"].Type != "float" {
+		t.Errorf("VWAP type 应该是 'float'，实际: %s", schema["VWAP"].Type)
+	}
+
+	if schema["VWAP"].Description == "" {
+		t.Error("VWAP description 不应为空")
+	}
+
+	if schema["multi_tf"].Type != "object" {
+		t.Errorf("multi_tf type 应该是 'object'，实际: %s", schema["multi_tf"].Type)
+	}
+
+	if schema["current_position"].Type != "object|null" {
+		t.Errorf("current_position type 应该是 'object|null'，实际: %s", schema["current_position"].Type)
+	}
+
+	t.Logf("✅ Schema 包含 %d 个字段", len(schema))
+	for field, schemaField := range schema {
+		t.Logf("  - %s: %s - %s", field, schemaField.Type, schemaField.Description)
+	}
+}
+
+// TestSchemaJSONSerialization tests that schema can be serialized to JSON
+// TestSchemaJSONSerialization 测试 Schema 可以序列化为 JSON
+func TestSchemaJSONSerialization(t *testing.T) {
+	schema := GetDefaultSchema()
+
+	// Serialize to JSON
+	// 序列化为 JSON
+	jsonBytes, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		t.Fatalf("Schema 序列化失败: %v", err)
+	}
+
+	// Verify it's valid JSON
+	// 验证是否为有效的 JSON
+	var schemaMap map[string]*SchemaField
+	err = json.Unmarshal(jsonBytes, &schemaMap)
+	if err != nil {
+		t.Fatalf("Schema 反序列化失败: %v", err)
+	}
+
+	// Verify all fields are preserved
+	// 验证所有字段都被保留
+	if len(schemaMap) != len(schema) {
+		t.Errorf("序列化后字段数量不匹配，期望: %d，实际: %d", len(schema), len(schemaMap))
+	}
+
+	t.Logf("✅ Schema JSON 序列化成功，大小: %d 字节", len(jsonBytes))
+	t.Logf("Schema JSON:\n%s", string(jsonBytes))
+}
+
+// TestCompleteJSONFormat tests the complete JSON format with instructions, schema, and data
+// TestCompleteJSONFormat 测试包含 instructions、schema 和 data 的完整 JSON 格式
+func TestCompleteJSONFormat(t *testing.T) {
+	// Create sample market data
+	// 创建示例市场数据
+	marketData := map[string]*SymbolMarketData{
+		"BTC/USDT": {
+			CurrentPrice: 90592.1,
+			Timeframe:    "15m",
+			Indicators: &IndicatorsData{
+				EMA: map[string]float64{
+					"12": 90673.82,
+					"26": 90945.0,
+				},
+				MACD: -271.18,
+				RSI: map[string]float64{
+					"7":  45.2,
+					"14": 48.5,
+				},
+				ADX: 25.3,
+				ATR: map[string]float64{
+					"3":  450.0,
+					"7":  520.0,
+					"14": 580.0,
+				},
+			},
+			Volume: &VolumeData{
+				Current:   1250000,
+				Average7:  1150000,
+				Average14: 1100000,
+				Average20: 1080000,
+			},
+		},
+	}
+
+	// Sample instructions
+	// 示例指令
+	instructions := "你是专业的趋势交易分析师。根据提供的市场数据，输出严格可解析的 JSON 格式分析结果。"
+
+	// Build complete JSON
+	// 构建完整 JSON
+	completeJSON := map[string]interface{}{
+		"instructions": instructions,
+		"schema":       GetDefaultSchema(),
+		"data":         marketData,
+	}
+
+	// Serialize to JSON
+	// 序列化为 JSON
+	jsonBytes, err := json.MarshalIndent(completeJSON, "", "  ")
+	if err != nil {
+		t.Fatalf("JSON 序列化失败: %v", err)
+	}
+
+	// Verify it's valid JSON
+	// 验证是否为有效的 JSON
+	var jsonMap map[string]interface{}
+	err = json.Unmarshal(jsonBytes, &jsonMap)
+	if err != nil {
+		t.Fatalf("JSON 反序列化失败: %v", err)
+	}
+
+	// Verify top-level keys
+	// 验证顶层键
+	requiredKeys := []string{"instructions", "schema", "data"}
+	for _, key := range requiredKeys {
+		if _, ok := jsonMap[key]; !ok {
+			t.Errorf("JSON 缺少必需的顶层键: %s", key)
+		}
+	}
+
+	// Verify instructions
+	// 验证 instructions
+	if instructionsVal, ok := jsonMap["instructions"].(string); !ok {
+		t.Error("instructions 应该是字符串类型")
+	} else if instructionsVal == "" {
+		t.Error("instructions 不应为空")
+	}
+
+	// Verify schema
+	// 验证 schema
+	if schemaVal, ok := jsonMap["schema"].(map[string]interface{}); !ok {
+		t.Error("schema 应该是对象类型")
+	} else if len(schemaVal) == 0 {
+		t.Error("schema 不应为空")
+	}
+
+	// Verify data
+	// 验证 data
+	if dataVal, ok := jsonMap["data"].(map[string]interface{}); !ok {
+		t.Error("data 应该是对象类型")
+	} else if len(dataVal) == 0 {
+		t.Error("data 不应为空")
+	}
+
+	t.Logf("✅ 完整 JSON 格式验证通过")
+	t.Logf("JSON 大小: %d 字节", len(jsonBytes))
+	t.Logf("包含交易对数量: %d", len(marketData))
+}

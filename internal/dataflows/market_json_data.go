@@ -41,19 +41,13 @@ type SymbolMarketData struct {
 // IndicatorsData represents technical indicators
 // IndicatorsData 表示技术指标
 type IndicatorsData struct {
-	EMA  map[string]float64 `json:"EMA"` // Key: period (e.g., "12", "26")
-	MACD float64            `json:"MACD"`
-	RSI  map[string]float64 `json:"RSI"` // Key: period (e.g., "7", "14")
-	ADX  float64            `json:"ADX"`
-	BB   *BBData            `json:"BB"`
-	ATR  map[string]float64 `json:"ATR"` // Key: period (e.g., "3", "7", "14")
-	VWAP *VWAPData          `json:"VWAP"`
-}
-
-// BBData represents Bollinger Bands data
-// BBData 表示布林带数据
-type BBData struct {
-	Timeframe map[string]*BBBands `json:"15m"` // Key: timeframe
+	EMA  map[string]float64  `json:"EMA"` // Key: period (e.g., "12", "26")
+	MACD float64             `json:"MACD"`
+	RSI  map[string]float64  `json:"RSI"` // Key: period (e.g., "7", "14")
+	ADX  float64             `json:"ADX"`
+	BB   map[string]*BBBands `json:"BB"`  // Key: timeframe (e.g., "15m")
+	ATR  map[string]float64  `json:"ATR"` // Key: period (e.g., "3", "7", "14")
+	VWAP *VWAPData           `json:"VWAP"`
 }
 
 // BBBands represents upper and lower Bollinger Bands
@@ -81,16 +75,16 @@ type VWAPHistoryData struct {
 // VolumeData represents volume information
 // VolumeData 表示成交量信息
 type VolumeData struct {
-	Current float64 `json:"current"`
-	Average float64 `json:"average"`
-	Period  string  `json:"period"`
+	Current   float64 `json:"current"`
+	Average7  float64 `json:"average_7"`
+	Average14 float64 `json:"average_14"`
+	Average20 float64 `json:"average_20"`
 }
 
 // PriceHistoryData represents price history for different timeframes
 // PriceHistoryData 表示不同时间框架的价格历史
 type PriceHistoryData struct {
 	TF15m *PriceSeriesData `json:"15m"`
-	TF1h  *PriceSeriesData `json:"1h"`
 }
 
 // PriceSeriesData represents a series of prices
@@ -142,6 +136,7 @@ type LongTermData struct {
 	ATR      map[string]float64 `json:"ATR"` // Key: period (e.g., "3", "7", "14")
 	MACD     []float64          `json:"MACD"`
 	RSI14    []float64          `json:"RSI14"`
+	Volume   *VolumeData        `json:"volume"` // 1h 时间框架的成交量数据
 }
 
 // PositionsData represents position and open interest data
@@ -350,12 +345,10 @@ func buildIndicatorsData(ohlcvData []OHLCV, indicators *TechnicalIndicators, tim
 
 	// Build BB data (last 10 values)
 	// 构建布林带数据（最后 10 个值）
-	bbData := &BBData{
-		Timeframe: map[string]*BBBands{
-			timeframe: {
-				Upper: roundSlice2(getLastNValues(indicators.BB_Upper, 10)),
-				Lower: roundSlice2(getLastNValues(indicators.BB_Lower, 10)),
-			},
+	bbData := map[string]*BBBands{
+		timeframe: {
+			Upper: roundSlice2(getLastNValues(indicators.BB_Upper, 10)),
+			Lower: roundSlice2(getLastNValues(indicators.BB_Lower, 10)),
 		},
 	}
 
@@ -382,30 +375,42 @@ func buildIndicatorsData(ohlcvData []OHLCV, indicators *TechnicalIndicators, tim
 // buildVolumeData 从 OHLCV 构建成交量数据
 func buildVolumeData(ohlcvData []OHLCV, timeframe string) *VolumeData {
 	if len(ohlcvData) == 0 {
-		return &VolumeData{Period: timeframe}
+		return &VolumeData{}
 	}
 
 	lastIdx := len(ohlcvData) - 1
 	currentVolume := ohlcvData[lastIdx].Volume
 
-	// Calculate average volume (last 20 periods)
-	// 计算平均成交量（最近 20 个周期）
-	n := 20
-	if len(ohlcvData) < n {
-		n = len(ohlcvData)
-	}
-	sum := 0.0
-	for i := lastIdx - n + 1; i <= lastIdx; i++ {
-		if i >= 0 {
-			sum += ohlcvData[i].Volume
+	// Helper function to calculate average volume for N periods
+	// 辅助函数：计算 N 个周期的平均成交量
+	calcAvgVolume := func(periods int) float64 {
+		n := periods
+		if len(ohlcvData) < n {
+			n = len(ohlcvData)
 		}
+		sum := 0.0
+		for i := lastIdx - n + 1; i <= lastIdx; i++ {
+			if i >= 0 {
+				sum += ohlcvData[i].Volume
+			}
+		}
+		if n == 0 {
+			return 0.0
+		}
+		return sum / float64(n)
 	}
-	avgVolume := sum / float64(n)
+
+	// Calculate average volumes for 7, 14, and 20 periods
+	// 计算 7、14 和 20 周期的平均成交量
+	avg7 := calcAvgVolume(7)
+	avg14 := calcAvgVolume(14)
+	avg20 := calcAvgVolume(20)
 
 	return &VolumeData{
-		Current: currentVolume,
-		Average: round2(avgVolume),
-		Period:  timeframe,
+		Current:   round2(currentVolume),
+		Average7:  round2(avg7),
+		Average14: round2(avg14),
+		Average20: round2(avg20),
 	}
 }
 
@@ -433,9 +438,6 @@ func buildPriceHistory(ohlcvData []OHLCV, longerOHLCV []OHLCV) *PriceHistoryData
 	return &PriceHistoryData{
 		TF15m: &PriceSeriesData{
 			Mid: roundSlice2(getMidPrices(ohlcvData, 10)),
-		},
-		TF1h: &PriceSeriesData{
-			Mid: roundSlice2(getMidPrices(longerOHLCV, 10)),
 		},
 	}
 }
@@ -601,6 +603,10 @@ func buildLongTermData(longerOHLCV []OHLCV, longerIndicators *TechnicalIndicator
 		priceMid = append(priceMid, midPrice)
 	}
 
+	// Build volume data for 1h timeframe
+	// 构建 1h 时间框架的成交量数据
+	volumeData := buildVolumeData(longerOHLCV, "1h")
+
 	return &LongTermData{
 		PriceMid: roundSlice2(priceMid),
 		EMA: map[string]float64{
@@ -612,8 +618,9 @@ func buildLongTermData(longerOHLCV []OHLCV, longerIndicators *TechnicalIndicator
 			"7":  round2(getLastValue(longerIndicators.ATR_7)),
 			"14": round2(getLastValue(longerIndicators.ATR_14)),
 		},
-		MACD:  roundSlice2(getLastNValues(longerIndicators.MACD, 10)),
-		RSI14: roundSlice2(getLastNValues(longerIndicators.RSI, 10)),
+		MACD:   roundSlice2(getLastNValues(longerIndicators.MACD, 10)),
+		RSI14:  roundSlice2(getLastNValues(longerIndicators.RSI, 10)),
+		Volume: volumeData,
 	}
 }
 
@@ -686,10 +693,6 @@ func buildPositionsData(ctx context.Context, marketData *MarketData, symbol stri
 // GetDefaultSchema 返回默认的 schema 字段描述
 func GetDefaultSchema() map[string]*SchemaField {
 	return map[string]*SchemaField{
-		"BB": {
-			Type:        "object",
-			Description: "布林带上下轨，用于参考支撑/阻力，key 为 upper/lower",
-		},
 		"VWAP": {
 			Type:        "float",
 			Description: "24H滚动成交量加权平均价格，可作为日内支撑/阻力参考",
@@ -705,6 +708,14 @@ func GetDefaultSchema() map[string]*SchemaField {
 		"price_history": {
 			Type:        "object",
 			Description: "key 为时间周期（如 15m, 1h），值为中间价序列，每个点为 (bid+ask)/2",
+		},
+		"BB": {
+			Type:        "object",
+			Description: "布林带上下轨，用于参考支撑/阻力，key 为 upper/lower",
+		},
+		"current_position": {
+			Type:        "object|null",
+			Description: "仅用于仓位管理判断，不得用于趋势或加仓决策",
 		},
 	}
 }

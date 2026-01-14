@@ -895,8 +895,8 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 		return g.makeSimpleDecision(), nil
 	}
 
-	// Build structured JSON data for all symbols with schema
-	// 为所有交易对构建结构化 JSON 数据（包含 schema）
+	// Build market data with schema
+	// 构建带 Schema 的市场数据
 	marketJSONData := &dataflows.MarketJSONData{
 		Schema: dataflows.GetDefaultSchema(),
 		Data:   make(map[string]*dataflows.SymbolMarketData),
@@ -910,22 +910,52 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	}
 	g.state.mu.RUnlock()
 
-	// Convert JSON data to string
-	// 将 JSON 数据转换为字符串
-	jsonBytes, err := sonic.MarshalIndent(marketJSONData, "", "  ")
+	// Load instructions from prompt file
+	// 从 Prompt 文件加载指令
+	promptFileContent := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
+
+	// Extract instructions from JSON if the prompt file is in JSON format
+	// 如果 Prompt 文件是 JSON 格式，提取 instructions 字段
+	var instructions string
+	var promptJSON map[string]interface{}
+	parseErr := sonic.UnmarshalString(promptFileContent, &promptJSON)
+	if parseErr == nil {
+		// Successfully parsed as JSON, extract "instructions"
+		// 成功解析为 JSON，提取 "instructions"
+		if inst, ok := promptJSON["instructions"].(string); ok {
+			instructions = inst
+		} else {
+			instructions = promptFileContent
+		}
+	} else {
+		// Not JSON, use whole content
+		// 不是 JSON，使用整个内容
+		instructions = promptFileContent
+	}
+
+	// Build final JSON: {instructions, schema, data}
+	// 构建最终 JSON：{instructions, schema, data}
+	finalJSON := map[string]interface{}{
+		"instructions": instructions,
+		"schema":       marketJSONData.Schema,
+		"data":         marketJSONData.Data,
+	}
+
+	// Convert to JSON string
+	// 转换为 JSON 字符串
+	jsonBytes, err := sonic.MarshalIndent(finalJSON, "", "  ")
 	if err != nil {
 		g.logger.Warning(fmt.Sprintf("JSON 序列化失败: %v，使用简单规则决策", err))
 		return g.makeSimpleDecision(), nil
 	}
-	marketDataJSON := string(jsonBytes)
 
-	// Load system prompt from file (trader_json_no_trailing_stop.txt)
-	// 从文件加载系统 Prompt（trader_json_no_trailing_stop.txt）
-	systemPrompt := loadPromptFromFile(g.config.TraderPromptPath, g.logger)
+	// System prompt is simple instruction
+	// 系统 Prompt 是简单的指令
+	systemPrompt := "你是专业的加密货币趋势交易分析师。请严格按照提供的 JSON 中的 instructions 和 schema 进行分析，并输出符合要求的 JSON 格式结果。"
 
-	// User prompt is just the market data JSON
-	// 用户 Prompt 就是市场数据 JSON
-	userPrompt := marketDataJSON
+	// User prompt is the complete JSON
+	// 用户 Prompt 是完整的 JSON
+	userPrompt := string(jsonBytes)
 
 	// Create messages
 	// 创建消息

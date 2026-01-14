@@ -1,4 +1,4 @@
-.PHONY: build run clean test help query build-web run-web demo
+.PHONY: build run clean test help query build-web run-web demo test-json
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -8,12 +8,14 @@ BINARY_NAME=crypto-trading-bot
 WEB_BINARY=crypto-trading-bot-web
 QUERY_BINARY=query
 DEMO_BINARY=demo
+TEST_JSON_BINARY=test-json-format
 BUILD_DIR=bin
 CMD_DIR=cmd
 MAIN_FILE=$(CMD_DIR)/main.go
 WEB_FILE=$(CMD_DIR)/web/main.go
 QUERY_FILE=$(CMD_DIR)/query/main.go
 DEMO_FILE=$(CMD_DIR)/demo/main.go
+TEST_JSON_FILE=$(CMD_DIR)/test_json_format/main.go
 
 ## build: 编译项目
 build:
@@ -61,6 +63,15 @@ demo:
 	@echo "✅ Demo 编译完成"
 	@echo "🚀 运行 Demo..."
 	@./$(BUILD_DIR)/$(DEMO_BINARY)
+
+## test-json: 编译并运行 JSON 格式测试
+test-json:
+	@echo "🔨 编译 JSON 格式测试程序..."
+	@mkdir -p $(BUILD_DIR)
+	@go build -o $(BUILD_DIR)/$(TEST_JSON_BINARY) $(TEST_JSON_FILE)
+	@echo "✅ 编译完成"
+	@echo "🚀 运行测试..."
+	@./$(BUILD_DIR)/$(TEST_JSON_BINARY)
 
 ## clean: 清理编译产物
 clean:
@@ -125,3 +136,7 @@ vet:
 help: Makefile
 	@echo " 选择一个命令:"
 	@sed -n 's/^##//p' $< | column -t -s ':' |  sed -e 's/^/ /'
+	@echo ""
+	@echo "💡 提示:"
+	@echo "   - 使用 'make test-json' 查看发送给 LLM 的 JSON 格式"
+	@echo "   - 使用 'make demo' 查看市场数据结构"
