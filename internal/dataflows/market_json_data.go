@@ -28,6 +28,7 @@ type MarketJSONData struct {
 type SymbolMarketData struct {
 	CurrentPrice     float64                      `json:"current_price"`
 	Timeframe        string                       `json:"timeframe"`
+	CurrentPosition  *CurrentPositionData         `json:"current_position,omitempty"` // Current position info / 当前持仓信息
 	Indicators       *IndicatorsData              `json:"indicators"`
 	Volume           *VolumeData                  `json:"volume"`
 	PriceHistory     *PriceHistoryData            `json:"price_history"`
@@ -36,6 +37,15 @@ type SymbolMarketData struct {
 	MarketStats      *MarketStatsData             `json:"market_stats"`
 	LongTerm1H       *LongTermData                `json:"long_term_1h"`
 	Positions        *PositionsData               `json:"positions"`
+}
+
+// CurrentPositionData represents current position information
+// CurrentPositionData 表示当前持仓信息
+type CurrentPositionData struct {
+	Side       string  `json:"side"`        // Position side: "LONG", "SHORT", or "" (no position) / 持仓方向
+	EntryPrice float64 `json:"entry_price"` // Entry price / 开仓价格
+	Size       float64 `json:"size"`        // Position size / 持仓数量
+	Leverage   int     `json:"leverage"`    // Leverage multiplier / 杠杆倍数
 }
 
 // IndicatorsData represents technical indicators
@@ -196,6 +206,7 @@ func BuildMarketJSONData(
 	indicators *TechnicalIndicators,
 	longerIndicators *TechnicalIndicators,
 	longerOHLCV []OHLCV,
+	currentPosition *CurrentPositionData, // Optional: current position info / 可选：当前持仓信息
 ) (*SymbolMarketData, error) {
 	if len(ohlcvData) == 0 {
 		return nil, fmt.Errorf("no OHLCV data available")
@@ -274,6 +285,7 @@ func BuildMarketJSONData(
 	return &SymbolMarketData{
 		CurrentPrice:     currentPrice,
 		Timeframe:        timeframe,
+		CurrentPosition:  currentPosition, // Add current position info / 添加当前持仓信息
 		Indicators:       indicatorsData,
 		Volume:           volumeData,
 		PriceHistory:     priceHistory,

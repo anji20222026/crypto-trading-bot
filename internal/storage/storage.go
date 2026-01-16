@@ -22,6 +22,7 @@ type TradingSession struct {
 	PositionInfo    string
 	Decision        string // 该交易对的专属决策 / Symbol-specific decision
 	FullDecision    string // LLM 原始完整决策（包含所有交易对）/ Full LLM decision (all symbols)
+	Leverage        int    // LLM 选择的杠杆倍数 / LLM-selected leverage
 	Executed        bool
 	ExecutionResult string
 }
@@ -215,8 +216,8 @@ func (s *Storage) SaveSession(session *TradingSession) (int64, error) {
 	INSERT INTO trading_sessions (
 		batch_id, symbol, timeframe, created_at,
 		market_report, crypto_report, sentiment_report,
-		position_info, decision, full_decision, executed, execution_result
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		position_info, decision, full_decision, leverage, executed, execution_result
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	result, err := s.db.Exec(
@@ -231,6 +232,7 @@ func (s *Storage) SaveSession(session *TradingSession) (int64, error) {
 		session.PositionInfo,
 		session.Decision,
 		session.FullDecision,
+		session.Leverage,
 		session.Executed,
 		session.ExecutionResult,
 	)
@@ -252,7 +254,7 @@ func (s *Storage) GetLatestSessions(limit int) ([]*TradingSession, error) {
 	query := `
 	SELECT id, batch_id, symbol, timeframe, created_at,
 		   market_report, crypto_report, sentiment_report,
-		   position_info, decision, full_decision, executed, execution_result
+		   position_info, decision, full_decision, leverage, executed, execution_result
 	FROM trading_sessions
 	ORDER BY created_at DESC
 	LIMIT ?
@@ -279,6 +281,7 @@ func (s *Storage) GetLatestSessions(limit int) ([]*TradingSession, error) {
 			&session.PositionInfo,
 			&session.Decision,
 			&session.FullDecision,
+			&session.Leverage,
 			&session.Executed,
 			&session.ExecutionResult,
 		)
@@ -297,7 +300,7 @@ func (s *Storage) GetSessionByID(id int64) (*TradingSession, error) {
 	query := `
 	SELECT id, batch_id, symbol, timeframe, created_at,
 		   market_report, crypto_report, sentiment_report,
-		   position_info, decision, full_decision, executed, execution_result
+		   position_info, decision, full_decision, leverage, executed, execution_result
 	FROM trading_sessions
 	WHERE id = ?
 	`
@@ -315,6 +318,7 @@ func (s *Storage) GetSessionByID(id int64) (*TradingSession, error) {
 		&session.PositionInfo,
 		&session.Decision,
 		&session.FullDecision,
+		&session.Leverage,
 		&session.Executed,
 		&session.ExecutionResult,
 	)
@@ -372,7 +376,7 @@ func (s *Storage) GetLatestBatches(limit int) ([]*BatchSession, error) {
 	sessionQuery := `
 	SELECT id, batch_id, symbol, timeframe, created_at,
 		   market_report, crypto_report, sentiment_report,
-		   position_info, decision, full_decision, executed, execution_result
+		   position_info, decision, full_decision, leverage, executed, execution_result
 	FROM trading_sessions
 	WHERE batch_id = ?
 	ORDER BY symbol
@@ -398,6 +402,7 @@ func (s *Storage) GetLatestBatches(limit int) ([]*BatchSession, error) {
 				&session.PositionInfo,
 				&session.Decision,
 				&session.FullDecision,
+				&session.Leverage,
 				&session.Executed,
 				&session.ExecutionResult,
 			)
@@ -422,7 +427,7 @@ func (s *Storage) GetSessionsBySymbol(symbol string, limit int) ([]*TradingSessi
 	query := `
 	SELECT id, batch_id, symbol, timeframe, created_at,
 		   market_report, crypto_report, sentiment_report,
-		   position_info, decision, full_decision, executed, execution_result
+		   position_info, decision, full_decision, leverage, executed, execution_result
 	FROM trading_sessions
 	WHERE symbol = ?
 	ORDER BY created_at DESC
@@ -450,6 +455,7 @@ func (s *Storage) GetSessionsBySymbol(symbol string, limit int) ([]*TradingSessi
 			&session.PositionInfo,
 			&session.Decision,
 			&session.FullDecision,
+			&session.Leverage,
 			&session.Executed,
 			&session.ExecutionResult,
 		)
@@ -1024,7 +1030,7 @@ func (s *Storage) GetBatchesWithPagination(offset, limit int) ([]*BatchSession, 
 	sessionsQuery := fmt.Sprintf(`
 	SELECT id, batch_id, symbol, timeframe, created_at,
 		   market_report, crypto_report, sentiment_report,
-		   position_info, decision, full_decision, executed, execution_result
+		   position_info, decision, full_decision, leverage, executed, execution_result
 	FROM trading_sessions
 	WHERE batch_id IN (%s)
 	ORDER BY batch_id, symbol
@@ -1060,6 +1066,7 @@ func (s *Storage) GetBatchesWithPagination(offset, limit int) ([]*BatchSession, 
 			&session.PositionInfo,
 			&session.Decision,
 			&session.FullDecision,
+			&session.Leverage,
 			&session.Executed,
 			&session.ExecutionResult,
 		)

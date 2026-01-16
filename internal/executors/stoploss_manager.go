@@ -948,7 +948,7 @@ func (sm *StopLossManager) placeStopLossOrder(ctx context.Context, pos *Position
 		Side(orderSide).
 		Type(futures.OrderTypeStopMarket).
 		StopPrice(fmt.Sprintf("%.2f", stopPrice)).
-		Quantity(fmt.Sprintf("%.4f", pos.Quantity)).
+		Quantity(formatQuantity(pos.Symbol, pos.Quantity)).
 		ReduceOnly(true). // 只平仓不开仓 / Close only
 		Do(ctx)
 

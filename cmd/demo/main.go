@@ -89,6 +89,7 @@ func main() {
 			indicators,
 			longerIndicators,
 			longerOHLCV,
+			nil, // No position info in demo / Demo 中不需要持仓信息
 		)
 		if err != nil {
 			log.Printf("❌ %s 结构化数据构建失败: %v", symbol, err)

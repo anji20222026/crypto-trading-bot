@@ -443,6 +443,143 @@ func ParseMultiCurrencyDecision(decisionText string, symbols []string) map[strin
 func parseJSONMultiCurrencyDecision(jsonText string, symbols []string) map[string]*TradingDecision {
 	decisions := make(map[string]*TradingDecision)
 
+	// Try to parse as TradingPairsResponse (new format with trading_pairs structure)
+	// 尝试解析为 TradingPairsResponse（新格式，包含 trading_pairs 结构）
+	var tradingPairsResp struct {
+		TradingPairs map[string]json.RawMessage `json:"trading_pairs"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &tradingPairsResp); err == nil && len(tradingPairsResp.TradingPairs) > 0 {
+		// Successfully parsed as trading_pairs format
+		// 成功解析为 trading_pairs 格式
+		for _, symbol := range symbols {
+			if rawDecision, ok := tradingPairsResp.TradingPairs[symbol]; ok {
+				// Parse the symbol decision structure
+				// 解析交易对决策结构
+				var symbolDecision struct {
+					ConfidenceToLeverage *struct {
+						Confidence *struct {
+							Value float64 `json:"value"`
+						} `json:"confidence"`
+						Leverage *struct {
+							Value float64 `json:"value"` // Changed from int to float64 to handle LLM returning decimals
+						} `json:"leverage"`
+					} `json:"confidence_to_leverage"`
+					DecisionGate *struct {
+						Value      string   `json:"value"`
+						ReasonCode []string `json:"reason_code"`
+					} `json:"decision_gate"`
+					TradingSignal *struct {
+						Action struct {
+							Value string `json:"value"`
+						} `json:"action"`
+						StopLoss     float64 `json:"stop_loss"`
+						TakeProfit   float64 `json:"take_profit"`
+						PositionSize float64 `json:"position_size"`
+						Reasoning    string  `json:"reasoning"`
+					} `json:"trading_signal"`
+					RiskMetrics *struct {
+						EstimatedRiskReward *struct {
+							Value float64 `json:"value"`
+						} `json:"estimated_risk_reward"`
+					} `json:"risk_metrics"`
+				}
+
+				if err := json.Unmarshal(rawDecision, &symbolDecision); err == nil {
+					// Extract action from trading_signal
+					// 从 trading_signal 提取动作
+					action := "HOLD"
+					if symbolDecision.TradingSignal != nil {
+						action = symbolDecision.TradingSignal.Action.Value
+					}
+
+					// Check decision_gate
+					// 检查决策门
+					decisionGateAllowsTrade := true
+					if symbolDecision.DecisionGate != nil && symbolDecision.DecisionGate.Value == "NO_TRADE" {
+						decisionGateAllowsTrade = false
+						action = "HOLD" // Force HOLD if decision_gate is NO_TRADE
+					}
+
+					// Extract confidence
+					// 提取置信度
+					confidence := 0.5
+					if symbolDecision.ConfidenceToLeverage != nil && symbolDecision.ConfidenceToLeverage.Confidence != nil {
+						confidence = symbolDecision.ConfidenceToLeverage.Confidence.Value
+					}
+
+					// Extract leverage
+					// 提取杠杆
+					leverage := 0
+					if symbolDecision.ConfidenceToLeverage != nil && symbolDecision.ConfidenceToLeverage.Leverage != nil {
+						// Round to nearest integer (LLM may return decimals like 11.25)
+						// 四舍五入到最近的整数（LLM 可能返回小数如 11.25）
+						leverage = int(symbolDecision.ConfidenceToLeverage.Leverage.Value + 0.5)
+					}
+
+					// Extract position size
+					// 提取仓位大小
+					positionSize := 0.0
+					if symbolDecision.TradingSignal != nil {
+						positionSize = symbolDecision.TradingSignal.PositionSize
+					}
+
+					// Extract stop loss
+					// 提取止损
+					stopLoss := 0.0
+					if symbolDecision.TradingSignal != nil {
+						stopLoss = symbolDecision.TradingSignal.StopLoss
+					}
+
+					// Extract reasoning
+					// 提取理由
+					reasoning := ""
+					if symbolDecision.TradingSignal != nil {
+						reasoning = symbolDecision.TradingSignal.Reasoning
+					}
+					if !decisionGateAllowsTrade {
+						if symbolDecision.DecisionGate != nil {
+							reasoning = fmt.Sprintf("decision_gate=NO_TRADE (%v)", symbolDecision.DecisionGate.ReasonCode)
+						}
+					}
+
+					// Create TradingDecision
+					// 创建 TradingDecision
+					decisions[symbol] = &TradingDecision{
+						Symbol:              symbol,
+						Action:              mapToTradeAction(strings.ToLower(action)),
+						Confidence:          confidence,
+						Leverage:            leverage,
+						Reason:              reasoning,
+						StopLoss:            stopLoss,
+						PositionSizePercent: positionSize,
+						Valid:               true,
+					}
+				} else {
+					// Failed to parse symbol decision, default to HOLD
+					// 解析交易对决策失败，默认观望
+					decisions[symbol] = &TradingDecision{
+						Symbol:     symbol,
+						Action:     executors.ActionHold,
+						Confidence: 0.5,
+						Reason:     fmt.Sprintf("解析 trading_pairs 格式失败: %v", err),
+						Valid:      true,
+					}
+				}
+			} else {
+				// Symbol not present in trading_pairs, default to HOLD
+				// trading_pairs 中没有该交易对，默认观望
+				decisions[symbol] = &TradingDecision{
+					Symbol:     symbol,
+					Action:     executors.ActionHold,
+					Confidence: 0.5,
+					Reason:     "trading_pairs 中未提供该交易对决策，默认观望",
+					Valid:      true,
+				}
+			}
+		}
+		return decisions
+	}
+
 	// Try to parse as map[string]TradeDecision (multi-symbol format, e.g. test.json)
 	// 尝试解析为 map[string]TradeDecision（多币种格式，例如 test.json）
 	var multi map[string]TradeDecision

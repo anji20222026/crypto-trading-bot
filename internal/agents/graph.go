@@ -495,6 +495,26 @@ func (g *SimpleTradingGraph) BuildGraph(ctx context.Context) (compose.Runnable[m
 					}
 				}
 
+				// Get current position info
+				// 获取当前持仓信息
+				var currentPosition *dataflows.CurrentPositionData
+				if g.executor != nil {
+					position, err := g.executor.GetCurrentPosition(ctx, sym)
+					if err == nil && position != nil && position.Side != "" {
+						// Convert position side to uppercase
+						// 转换持仓方向为大写
+						side := strings.ToUpper(position.Side)
+						currentPosition = &dataflows.CurrentPositionData{
+							Side:       side,
+							EntryPrice: position.EntryPrice,
+							Size:       position.Size,
+							Leverage:   position.Leverage,
+						}
+						g.logger.Info(fmt.Sprintf("  📍 %s 当前持仓: %s, 开仓价: %.2f, 数量: %.4f, 杠杆: %dx",
+							sym, side, position.EntryPrice, position.Size, position.Leverage))
+					}
+				}
+
 				// Build structured JSON data for LLM
 				// 为 LLM 构建结构化 JSON 数据
 				g.logger.Info(fmt.Sprintf("  🔧 正在构建 %s 结构化市场数据...", sym))
@@ -507,6 +527,7 @@ func (g *SimpleTradingGraph) BuildGraph(ctx context.Context) (compose.Runnable[m
 					indicators,
 					longerIndicators,
 					longerOHLCV,
+					currentPosition, // Pass current position info / 传入当前持仓信息
 				)
 				if err != nil {
 					g.logger.Warning(fmt.Sprintf("  ⚠️  %s 结构化数据构建失败: %v", sym, err))
@@ -1293,11 +1314,110 @@ func convertTradingPairsToLegacyFormat(tradingPairs map[string]*SymbolDecision, 
 			continue
 		}
 
-		// Extract action from trading_signal
-		// 从 trading_signal 提取动作
+		// 🔍 打印原始决策结构的关键字段
+		// Print key fields from the raw decision structure
+		log.Header(fmt.Sprintf("🔍 解析 %s 决策结构", symbol), '-', 60)
+
+		// Print decision_gate
+		if decision.DecisionGate != nil {
+			log.Info(fmt.Sprintf("decision_gate.value: %s", decision.DecisionGate.Value))
+			if decision.DecisionGate.ReasonCode != nil {
+				log.Info(fmt.Sprintf("decision_gate.reason_code: %v", decision.DecisionGate.ReasonCode.Value))
+			}
+		} else {
+			log.Warning("decision_gate: nil")
+		}
+
+		// Print trading_signal
+		if decision.TradingSignal != nil {
+			if decision.TradingSignal.Action != nil {
+				log.Info(fmt.Sprintf("trading_signal.action.value: %s", decision.TradingSignal.Action.Value))
+			} else {
+				log.Warning("trading_signal.action: nil")
+			}
+			log.Info(fmt.Sprintf("trading_signal.stop_loss: %.2f", decision.TradingSignal.StopLoss))
+			log.Info(fmt.Sprintf("trading_signal.position_size: %.2f", decision.TradingSignal.PositionSize))
+		} else {
+			log.Warning("trading_signal: nil")
+		}
+
+		// Print confidence_to_leverage
+		if decision.ConfidenceToLeverage != nil {
+			if decision.ConfidenceToLeverage.Confidence != nil {
+				log.Info(fmt.Sprintf("confidence_to_leverage.confidence.value: %.2f", decision.ConfidenceToLeverage.Confidence.Value))
+			} else {
+				log.Warning("confidence_to_leverage.confidence: nil")
+			}
+			if decision.ConfidenceToLeverage.Leverage != nil {
+				log.Info(fmt.Sprintf("confidence_to_leverage.leverage.value: %d (min: %d, max: %d)",
+					decision.ConfidenceToLeverage.Leverage.Value,
+					decision.ConfidenceToLeverage.Leverage.Min,
+					decision.ConfidenceToLeverage.Leverage.Max))
+			} else {
+				log.Warning("confidence_to_leverage.leverage: nil")
+			}
+		} else {
+			log.Warning("confidence_to_leverage: nil")
+		}
+
+		// Extract action from trading_signal, but respect decision_gate
+		// 从 trading_signal 提取动作，但要尊重 decision_gate
+		//
+		// 执行交易需要同时满足两个条件：
+		// 1. decision_gate.value = "TRADE" (决策门允许交易)
+		// 2. trading_signal.action.value = "BUY" 或 "SELL" (有明确的买卖信号)
 		action := "HOLD"
+
+		// Step 1: Check decision_gate
+		// 步骤 1: 检查 decision_gate
+		decisionGateAllowsTrade := false
+		if decision.DecisionGate != nil {
+			decisionGateValue := strings.ToUpper(strings.TrimSpace(decision.DecisionGate.Value))
+			log.Info(fmt.Sprintf("  decision_gate.value = %s", decisionGateValue))
+
+			if decisionGateValue == "TRADE" {
+				decisionGateAllowsTrade = true
+			} else if decisionGateValue == "NO_TRADE" {
+				decisionGateAllowsTrade = false
+				log.Info("  ⚠️  decision_gate = NO_TRADE，不允许交易")
+			} else {
+				log.Warning(fmt.Sprintf("  ⚠️  未知的 decision_gate 值: %s，默认不允许交易", decisionGateValue))
+			}
+		} else {
+			// No decision_gate, assume trading is allowed (backward compatibility)
+			// 没有 decision_gate，假设允许交易（向后兼容）
+			decisionGateAllowsTrade = true
+			log.Info("  ℹ️  无 decision_gate，默认允许交易")
+		}
+
+		// Step 2: Check trading_signal.action
+		// 步骤 2: 检查 trading_signal.action
+		tradingSignalAction := "HOLD"
 		if decision.TradingSignal != nil && decision.TradingSignal.Action != nil {
-			action = decision.TradingSignal.Action.Value
+			tradingSignalAction = strings.ToUpper(strings.TrimSpace(decision.TradingSignal.Action.Value))
+			log.Info(fmt.Sprintf("  trading_signal.action.value = %s", tradingSignalAction))
+		} else {
+			log.Warning("  ⚠️  trading_signal.action 为空，默认 HOLD")
+		}
+
+		// Step 3: Determine final action based on both conditions
+		// 步骤 3: 根据两个条件确定最终动作
+		if decisionGateAllowsTrade {
+			// decision_gate allows trading, check if trading_signal has BUY/SELL
+			// decision_gate 允许交易，检查 trading_signal 是否有 BUY/SELL
+			if tradingSignalAction == "BUY" || tradingSignalAction == "SELL" ||
+			   tradingSignalAction == "CLOSE_LONG" || tradingSignalAction == "CLOSE_SHORT" {
+				action = tradingSignalAction
+				log.Info(fmt.Sprintf("  ✅ 满足交易条件: decision_gate=TRADE + action=%s → 执行 %s", tradingSignalAction, action))
+			} else {
+				action = "HOLD"
+				log.Info(fmt.Sprintf("  ⚠️  decision_gate=TRADE 但 action=%s → 观望", tradingSignalAction))
+			}
+		} else {
+			// decision_gate does not allow trading, force HOLD
+			// decision_gate 不允许交易，强制 HOLD
+			action = "HOLD"
+			log.Info(fmt.Sprintf("  ⚠️  decision_gate 不允许交易 → 强制 HOLD (忽略 trading_signal.action=%s)", tradingSignalAction))
 		}
 
 		// Extract confidence from confidence_to_leverage

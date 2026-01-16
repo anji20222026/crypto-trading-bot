@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bytedance/sonic"
 	openaiComponent "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
 	"github.com/oak/crypto-trading-bot/internal/agents"
@@ -500,6 +501,7 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 		// Get symbol-specific decision text
 		// 获取该交易对的专属决策文本
 		symbolDecision := decision // Default to full decision
+		leverage := 0              // Default leverage
 		if parsedDecision, ok := symbolDecisions[symbol]; ok && parsedDecision.Valid {
 			// Format symbol-specific decision for display
 			// 格式化该交易对的专属决策用于显示
@@ -513,6 +515,9 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 				parsedDecision.Confidence,
 				parsedDecision.Leverage,
 				parsedDecision.Reason)
+			// Save leverage for database
+			// 保存杠杆到数据库
+			leverage = parsedDecision.Leverage
 			// Log successful parsing
 			// 记录解析成功
 			log.Info(fmt.Sprintf("【%s】决策解析成功: Action=%s, Confidence=%.2f, Leverage=%d",
@@ -523,17 +528,37 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 			log.Warning(fmt.Sprintf("【%s】决策解析失败，使用完整决策文本 (可能导致前端显示不准确)", symbol))
 		}
 
+		// Serialize MarketJSONData to JSON string for database storage
+		// 将 MarketJSONData 序列化为 JSON 字符串以保存到数据库
+		var marketReportJSON string
+		if reports.MarketJSONData != nil {
+			jsonBytes, err := sonic.Marshal(reports.MarketJSONData)
+			if err != nil {
+				log.Warning(fmt.Sprintf("【%s】市场数据 JSON 序列化失败: %v，使用文本报告", symbol, err))
+				marketReportJSON = reports.MarketReport
+			} else {
+				marketReportJSON = string(jsonBytes)
+				log.Info(fmt.Sprintf("【%s】市场数据已序列化为 JSON (%d 字节)", symbol, len(jsonBytes)))
+			}
+		} else {
+			// Fallback to text report if JSON data is not available
+			// 如果 JSON 数据不可用，回退到文本报告
+			marketReportJSON = reports.MarketReport
+			log.Warning(fmt.Sprintf("【%s】MarketJSONData 不可用，使用文本报告", symbol))
+		}
+
 		session := &storage.TradingSession{
 			BatchID:         batchID, // ✅ Batch ID shared across all symbols in this run
 			Symbol:          symbol,
 			Timeframe:       cfg.CryptoTimeframe,
 			CreatedAt:       time.Now(),
-			MarketReport:    reports.MarketReport,
+			MarketReport:    marketReportJSON, // ✅ JSON format market data
 			CryptoReport:    reports.CryptoReport,
 			SentimentReport: reports.SentimentReport,
 			PositionInfo:    reports.PositionInfo,
 			Decision:        symbolDecision, // ✅ Symbol-specific decision
 			FullDecision:    decision,       // ✅ Full LLM decision (all symbols)
+			Leverage:        leverage,       // ✅ Save leverage to database
 			Executed:        false,
 			ExecutionResult: "",
 		}
@@ -577,6 +602,31 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 		// Initialize trade coordinator with stop-loss manager
 		// 初始化交易协调器（传入止损管理器）
 		coordinator := executors.NewTradeCoordinator(cfg, executor, log, globalStopLossManager)
+
+		// Initialize fund manager
+		// 初始化资金管理器
+		fundManager := executors.NewFundManager(cfg, executor, log)
+
+		// Prepare trading decisions for fund allocation
+		// 准备交易决策用于资金分配
+		tradingDecisions := []*executors.TradingDecisionWithConfidence{}
+		for symbol, symbolDecision := range decisions {
+			if symbolDecision.Valid {
+				tradingDecisions = append(tradingDecisions, &executors.TradingDecisionWithConfidence{
+					Symbol:     symbol,
+					Action:     symbolDecision.Action,
+					Confidence: symbolDecision.Confidence,
+				})
+			}
+		}
+
+		// Allocate funds based on usage limit (70% max)
+		// 根据使用率限制分配资金（最大 70%）
+		fundAllocations, err := fundManager.AllocateFunds(ctx, tradingDecisions)
+		if err != nil {
+			log.Error(fmt.Sprintf("资金分配失败: %v", err))
+			return fmt.Errorf("资金分配失败: %w", err)
+		}
 
 		// Execute trades for each symbol
 		// 为每个交易对执行交易
@@ -655,6 +705,30 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 				continue
 			}
 
+			// Check fund allocation result
+			// 检查资金分配结果
+			allocation, hasAllocation := fundAllocations[symbol]
+			if !hasAllocation {
+				log.Warning(fmt.Sprintf("⚠️  %s 未在资金分配结果中", symbol))
+				executionResults[symbol] = "未在资金分配结果中"
+				continue
+			}
+
+			if !allocation.CanTrade {
+				log.Warning(fmt.Sprintf("⚠️  %s 资金分配拒绝交易: %s", symbol, allocation.Reason))
+				executionResults[symbol] = fmt.Sprintf("资金分配拒绝: %s", allocation.Reason)
+				continue
+			}
+
+			// Use allocated position size from fund manager
+			// 使用资金管理器分配的仓位大小
+			adjustedPositionSize := allocation.AllocatedPercent
+			if allocation.AdjustedByConfidence {
+				log.Info(fmt.Sprintf("💡 仓位按置信度优先分配: %.2f%%", adjustedPositionSize))
+			} else {
+				log.Info(fmt.Sprintf("💡 仓位平均分配: %.2f%%", adjustedPositionSize))
+			}
+
 			// Execute the trade using coordinator
 			// 使用协调器执行交易
 			result, err := coordinator.ExecuteDecisionWithParams(
@@ -663,7 +737,7 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 				symbolDecision.Action,
 				symbolDecision.Reason,
 				symbolDecision.Leverage,
-				symbolDecision.PositionSizePercent,
+				adjustedPositionSize, // Use allocated position size / 使用分配的仓位大小
 			)
 			if err != nil {
 				log.Error(fmt.Sprintf("❌ %s 交易执行失败: %v", symbol, err))

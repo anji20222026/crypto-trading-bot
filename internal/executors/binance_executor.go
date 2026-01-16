@@ -496,7 +496,7 @@ func (e *BinanceExecutor) executeBuy(ctx context.Context, symbol string, current
 			Side(futures.SideTypeBuy).
 			PositionSide(positionSide).
 			Type(futures.OrderTypeMarket).
-			Quantity(fmt.Sprintf("%.4f", amount)).
+			Quantity(formatQuantity(symbol, amount)).
 			Do(ctx)
 
 		if err != nil {
@@ -578,7 +578,7 @@ func (e *BinanceExecutor) executeSell(ctx context.Context, symbol string, curren
 			Side(futures.SideTypeSell).
 			PositionSide(positionSide).
 			Type(futures.OrderTypeMarket).
-			Quantity(fmt.Sprintf("%.4f", amount)).
+			Quantity(formatQuantity(symbol, amount)).
 			Do(ctx)
 
 		if err != nil {
@@ -639,7 +639,7 @@ func (e *BinanceExecutor) executeCloseLong(ctx context.Context, symbol string, c
 		Side(futures.SideTypeSell).
 		PositionSide(positionSide).
 		Type(futures.OrderTypeMarket).
-		Quantity(fmt.Sprintf("%.4f", currentPosition.Size))
+		Quantity(formatQuantity(symbol, currentPosition.Size))
 
 	// Only use ReduceOnly in Hedge mode, not in One-way mode
 	// 只在双向持仓模式使用 ReduceOnly，单向模式不使用
@@ -689,7 +689,7 @@ func (e *BinanceExecutor) executeCloseShort(ctx context.Context, symbol string, 
 		Side(futures.SideTypeBuy).
 		PositionSide(positionSide).
 		Type(futures.OrderTypeMarket).
-		Quantity(fmt.Sprintf("%.4f", currentPosition.Size))
+		Quantity(formatQuantity(symbol, currentPosition.Size))
 
 	// Only use ReduceOnly in Hedge mode, not in One-way mode
 	// 只在双向持仓模式使用 ReduceOnly，单向模式不使用
@@ -1320,4 +1320,12 @@ func getSymbolPrecision(symbol string) (precision int, minQty float64) {
 	}
 
 	return precision, minQty
+}
+
+// formatQuantity formats quantity according to symbol's precision
+// formatQuantity 根据交易对的精度格式化数量
+func formatQuantity(symbol string, quantity float64) string {
+	precision, _ := getSymbolPrecision(symbol)
+	format := fmt.Sprintf("%%.%df", precision)
+	return fmt.Sprintf(format, quantity)
 }
