@@ -56,8 +56,8 @@
   "position_adjustment": {
     "scope": "仅对已有仓位",
     "allowed_actions": ["HOLD","CLOSE_LONG","CLOSE_SHORT"],
-    "prohibited_actions": ["BUY","SELL","加仓","减仓","改杠杆"],
-    "close_conditions": ["趋势反转","关键结构破坏","波动异常"]
+    "stop_loss_adjustment": {"value": "HOLD","enum": ["ALLOW", "HOLD", "DISALLOW"]},
+    "reasoning": ["趋势反转","关键结构破坏","波动异常"]
   },
   "decision_gate": {
     "value": null,
@@ -117,15 +117,11 @@
         },
         "trading_signal": {
           "action": { "value": "HOLD" },
-          "stop_loss": 0.0,
-          "take_profit": 0.0,
-          "position_size": 0,
           "reasoning": "多头结构未破但动能放缓"
         },
         "position_adjustment": {
           "action": { "value": "HOLD" },
           "stop_loss_adjustment": { "value": null },
-          "take_profit_adjustment": { "value": null },
           "reasoning": ""
         }
       }

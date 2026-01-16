@@ -1178,6 +1178,168 @@ func (sm *StopLossManager) UpdatePositionHighestPrice(symbol string, highestPric
 	return nil
 }
 
+// UpdateStopLossWithStrategy updates stop-loss based on strategy directive (ALLOW/HOLD/DISALLOW)
+// UpdateStopLossWithStrategy 基于策略指令更新止损（ALLOW/HOLD/DISALLOW）
+//
+// This is the NEW stop-loss adjustment method that uses boundary correction method.
+// 这是新的止损调整方法，使用边界修正法。
+//
+// Parameters:
+// 参数：
+//   - ctx: Context
+//   - symbol: Trading symbol
+//   - strategy: "ALLOW" | "HOLD" | "DISALLOW"
+//   - swingLevel: Swing low (for long) or swing high (for short)
+//   - ema20: EMA20 value
+//   - atr: Current ATR value
+//   - reason: Adjustment reason
+//
+// Strategy behavior:
+// 策略行为：
+//   - ALLOW: Calculate new stop-loss using boundary correction method
+//     允许：使用边界修正法计算新止损
+//   - HOLD: Keep current stop-loss, do not calculate new one
+//     保持：保持当前止损，不计算新止损
+//   - DISALLOW: Prohibit any stop-loss adjustment (log warning)
+//     禁止：禁止任何止损调整（记录警告）
+func (sm *StopLossManager) UpdateStopLossWithStrategy(
+	ctx context.Context,
+	symbol string,
+	strategy string,
+	swingLevel float64,
+	ema20 float64,
+	atr float64,
+	reason string,
+) error {
+	normalizedSymbol := sm.config.GetBinanceSymbolFor(symbol)
+
+	sm.mu.RLock()
+	pos, exists := sm.positions[normalizedSymbol]
+	if !exists {
+		sm.mu.RUnlock()
+		return fmt.Errorf("持仓 %s 不存在", symbol)
+	}
+
+	side := pos.Side
+	currentStopLoss := pos.CurrentStopLoss
+	sm.mu.RUnlock()
+
+	// Handle strategy directives
+	// 处理策略指令
+	switch strings.ToUpper(strategy) {
+	case "DISALLOW":
+		sm.logger.Info(fmt.Sprintf("【%s】🚫 止损调整策略: DISALLOW - 禁止调整止损（%s）", symbol, reason))
+		return nil
+
+	case "HOLD":
+		sm.logger.Info(fmt.Sprintf("【%s】⏸️  止损调整策略: HOLD - 保持当前止损 %.2f（%s）", symbol, currentStopLoss, reason))
+		return nil
+
+	case "ALLOW":
+		sm.logger.Info(fmt.Sprintf("【%s】✅ 止损调整策略: ALLOW - 允许用新结构计算更紧的止损（%s）", symbol, reason))
+
+		// Validate inputs
+		// 验证输入
+		if swingLevel == 0.0 {
+			sm.logger.Warning(fmt.Sprintf("【%s】⚠️ 未提供支撑/阻力位，无法计算基于结构的止损", symbol))
+			return nil
+		}
+
+		if atr <= 0 {
+			sm.logger.Warning(fmt.Sprintf("【%s】⚠️ ATR 值无效 (%.4f)，无法计算止损", symbol, atr))
+			return nil
+		}
+
+		levelType := "支撑位"
+		if side == "short" {
+			levelType = "阻力位"
+		}
+		sm.logger.Info(fmt.Sprintf("【%s】📊 新%s: %.2f, ATR: %.2f",
+			symbol, levelType, swingLevel, atr))
+
+		// Calculate candidate stop-loss using structure-based method
+		// 使用基于结构的方法计算候选止损
+		// Formula (已有仓位):
+		// 公式（已有仓位）：
+		//   Long:  candidate_sl = new_support + ATR × (0~0.3)
+		//   Short: candidate_sl = new_resistance - ATR × (0~0.3)
+		bufferMultiplier := 0.15 // Default α = 0.15 (middle of 0~0.3 range for trailing)
+		candidateStopLoss := sm.calculator.CalculateStructureBasedStopWithBoundary(
+			symbol,
+			side,
+			swingLevel,
+			ema20,
+			atr,
+			bufferMultiplier,
+			false, // isInitial = false (this is a trailing adjustment)
+		)
+
+		if candidateStopLoss == 0.0 {
+			sm.logger.Warning(fmt.Sprintf("【%s】⚠️ 计算候选止损失败", symbol))
+			return nil
+		}
+
+		// Apply "only tighten" logic
+		// 应用"只收紧"逻辑
+		var newStopLoss float64
+
+		if side == "long" {
+			// Long: stop_loss = max(current_stop_loss, candidate_sl)
+			// 多仓：止损 = max(当前止损, 候选止损)
+			if candidateStopLoss > currentStopLoss {
+				newStopLoss = candidateStopLoss
+				sm.logger.Info(fmt.Sprintf("【%s】✅ 止损收紧: %.2f → %.2f (多仓向上移动)",
+					symbol, currentStopLoss, newStopLoss))
+			} else {
+				sm.logger.Info(fmt.Sprintf("【%s】💡 候选止损 %.2f 未高于当前止损 %.2f，保持不变（只收紧原则）",
+					symbol, candidateStopLoss, currentStopLoss))
+				return nil
+			}
+		} else {
+			// Short: stop_loss = min(current_stop_loss, candidate_sl)
+			// 空仓：止损 = min(当前止损, 候选止损)
+			if candidateStopLoss < currentStopLoss {
+				newStopLoss = candidateStopLoss
+				sm.logger.Info(fmt.Sprintf("【%s】✅ 止损收紧: %.2f → %.2f (空仓向下移动)",
+					symbol, currentStopLoss, newStopLoss))
+			} else {
+				sm.logger.Info(fmt.Sprintf("【%s】💡 候选止损 %.2f 未低于当前止损 %.2f，保持不变（只收紧原则）",
+					symbol, candidateStopLoss, currentStopLoss))
+				return nil
+			}
+		}
+
+		if newStopLoss == 0.0 {
+			sm.logger.Warning(fmt.Sprintf("【%s】⚠️ 计算止损失败，保持当前止损", symbol))
+			return nil
+		}
+
+		// Check if change is significant enough
+		// 检查变化是否足够大
+		if !sm.calculator.ShouldUpdate(symbol, currentStopLoss, newStopLoss) {
+			changePercent := math.Abs((newStopLoss-currentStopLoss)/currentStopLoss) * 100
+			sm.logger.Info(fmt.Sprintf("【%s】💡 止损价变化较小 (%.2f%%)，跳过更新以避免频繁调整",
+				symbol, changePercent))
+			return nil
+		}
+
+		// Update stop-loss using existing method
+		// 使用现有方法更新止损
+		structureType := "支撑位"
+		if side == "short" {
+			structureType = "阻力位"
+		}
+		updateReason := fmt.Sprintf("基于结构（%s=%.2f, ATR=%.2f, α=%.2f）: %s",
+			structureType, swingLevel, atr, bufferMultiplier, reason)
+
+		return sm.UpdateStopLoss(ctx, symbol, newStopLoss, updateReason)
+
+	default:
+		sm.logger.Warning(fmt.Sprintf("【%s】⚠️ 未知的止损调整策略: %s，保持当前止损", symbol, strategy))
+		return nil
+	}
+}
+
 // Stop stops the stop-loss manager
 // Stop 停止止损管理器
 func (sm *StopLossManager) Stop() {

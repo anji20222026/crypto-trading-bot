@@ -38,18 +38,19 @@ type SymbolReports struct {
 // TradeDecision represents a structured trading decision from LLM (for JSON Schema output)
 // TradeDecision 表示 LLM 的结构化交易决策（用于 JSON Schema 输出）
 type TradeDecision struct {
-	Symbol            string   `json:"symbol"`                        // 交易对 / Trading pair
-	Action            string   `json:"action"`                        // 交易动作 / Action: BUY|SELL|HOLD|CLOSE_LONG|CLOSE_SHORT
-	Confidence        float64  `json:"confidence"`                    // 置信度 / Confidence (0.00-1.00)
-	Leverage          int      `json:"leverage"`                      // 杠杆倍数 / Leverage multiplier
-	PositionSize      float64  `json:"position_size"`                 // 建议仓位百分比 / Position size percentage (0-100)
-	StopLoss          float64  `json:"stop_loss"`                     // 止损价格 / Stop loss price
-	Reasoning         string   `json:"reasoning"`                     // 交易理由 / Trading reasoning
-	RiskRewardRatio   float64  `json:"risk_reward_ratio"`             // 预期盈亏比 / Risk/reward ratio
-	Summary           string   `json:"summary"`                       // 总结 / Summary
-	CurrentPnlPercent *float64 `json:"current_pnl_percent,omitempty"` // 当前盈亏% (仅HOLD) / Current PnL% (HOLD only)
-	NewStopLoss       *float64 `json:"new_stop_loss,omitempty"`       // 新止损价格 (仅HOLD调整时) / New stop loss (HOLD adjustment only)
-	StopLossReason    *string  `json:"stop_loss_reason,omitempty"`    // 止损调整理由 (仅HOLD调整时) / Stop loss reason (HOLD adjustment only)
+	Symbol                      string   `json:"symbol"`                                  // 交易对 / Trading pair
+	Action                      string   `json:"action"`                                  // 交易动作 / Action: BUY|SELL|HOLD|CLOSE_LONG|CLOSE_SHORT
+	Confidence                  float64  `json:"confidence"`                              // 置信度 / Confidence (0.00-1.00)
+	Leverage                    int      `json:"leverage"`                                // 杠杆倍数 / Leverage multiplier
+	PositionSize                float64  `json:"position_size"`                           // 建议仓位百分比 / Position size percentage (0-100)
+	StopLoss                    float64  `json:"stop_loss"`                               // 止损价格 / Stop loss price
+	Reasoning                   string   `json:"reasoning"`                               // 交易理由 / Trading reasoning
+	RiskRewardRatio             float64  `json:"risk_reward_ratio"`                       // 预期盈亏比 / Risk/reward ratio
+	Summary                     string   `json:"summary"`                                 // 总结 / Summary
+	CurrentPnlPercent           *float64 `json:"current_pnl_percent,omitempty"`           // 当前盈亏% (仅HOLD) / Current PnL% (HOLD only)
+	NewStopLoss                 *float64 `json:"new_stop_loss,omitempty"`                 // 新止损价格 (仅HOLD调整时) / New stop loss (HOLD adjustment only)
+	StopLossReason              *string  `json:"stop_loss_reason,omitempty"`              // 止损调整理由 (仅HOLD调整时) / Stop loss reason (HOLD adjustment only)
+	StopLossAdjustmentStrategy  *string  `json:"stop_loss_adjustment_strategy,omitempty"` // 止损调整策略 (ALLOW/HOLD/DISALLOW) / Stop loss adjustment strategy
 }
 
 // TradingPairsResponse represents the new response format with trading_pairs structure
@@ -116,10 +117,19 @@ type TradingSignal struct {
 // PositionAdjustment 表示仓位调整数据
 type PositionAdjustment struct {
 	Action               *EnumValue `json:"action"`                 // 调整动作 / Adjustment action
-	StopLossAdjustment   *ValueOnly `json:"stop_loss_adjustment"`   // 止损调整 / Stop loss adjustment
+	StopLossAdjustment   *EnumValue `json:"stop_loss_adjustment"`   // 止损调整策略 / Stop loss adjustment strategy
 	TakeProfitAdjustment *ValueOnly `json:"take_profit_adjustment"` // 止盈调整 / Take profit adjustment
 	Reasoning            string     `json:"reasoning"`              // 理由 / Reasoning
 }
+
+// StopLossAdjustment strategy values:
+// 止损调整策略值：
+//   - ALLOW: Allow calculating new stop-loss based on new support/resistance
+//     允许基于新的支撑/阻力计算更紧的止损
+//   - HOLD: Keep current stop-loss, do not calculate new one (technically possible but not this time)
+//     保持当前止损，不计算新止损（技术上可以，但这次不动）
+//   - DISALLOW: Prohibit any stop-loss adjustment (e.g., during high volatility)
+//     禁止任何止损调整（策略级禁止，例如波动异常时）
 
 // EnumValue represents a value with enum constraint
 // EnumValue 表示带枚举约束的值
@@ -504,14 +514,13 @@ func (g *SimpleTradingGraph) BuildGraph(ctx context.Context) (compose.Runnable[m
 						// Convert position side to uppercase
 						// 转换持仓方向为大写
 						side := strings.ToUpper(position.Side)
+
 						currentPosition = &dataflows.CurrentPositionData{
-							Side:       side,
-							EntryPrice: position.EntryPrice,
-							Size:       position.Size,
-							Leverage:   position.Leverage,
+							Side:     side,
+							StopLoss: position.CurrentStopLoss,
 						}
-						g.logger.Info(fmt.Sprintf("  📍 %s 当前持仓: %s, 开仓价: %.2f, 数量: %.4f, 杠杆: %dx",
-							sym, side, position.EntryPrice, position.Size, position.Leverage))
+						g.logger.Info(fmt.Sprintf("  📍 %s 当前持仓: %s, 止损: %.2f",
+							sym, side, position.CurrentStopLoss))
 					}
 				}
 
@@ -1406,7 +1415,7 @@ func convertTradingPairsToLegacyFormat(tradingPairs map[string]*SymbolDecision, 
 			// decision_gate allows trading, check if trading_signal has BUY/SELL
 			// decision_gate 允许交易，检查 trading_signal 是否有 BUY/SELL
 			if tradingSignalAction == "BUY" || tradingSignalAction == "SELL" ||
-			   tradingSignalAction == "CLOSE_LONG" || tradingSignalAction == "CLOSE_SHORT" {
+				tradingSignalAction == "CLOSE_LONG" || tradingSignalAction == "CLOSE_SHORT" {
 				action = tradingSignalAction
 				log.Info(fmt.Sprintf("  ✅ 满足交易条件: decision_gate=TRADE + action=%s → 执行 %s", tradingSignalAction, action))
 			} else {
@@ -1450,14 +1459,14 @@ func convertTradingPairsToLegacyFormat(tradingPairs map[string]*SymbolDecision, 
 			stopLoss = decision.RiskMetrics.StopLoss.Value
 		}
 
-		// Check for position adjustment stop loss (for HOLD actions)
-		// 检查仓位调整止损（用于 HOLD 动作）
-		var newStopLoss *float64
+		// Check for position adjustment stop loss strategy (for HOLD actions)
+		// 检查仓位调整止损策略（用于 HOLD 动作）
+		var stopLossAdjustmentStrategy *string
 		var stopLossReason *string
 		if decision.PositionAdjustment != nil {
-			if decision.PositionAdjustment.StopLossAdjustment != nil && decision.PositionAdjustment.StopLossAdjustment.Value > 0 {
-				val := decision.PositionAdjustment.StopLossAdjustment.Value
-				newStopLoss = &val
+			if decision.PositionAdjustment.StopLossAdjustment != nil && decision.PositionAdjustment.StopLossAdjustment.Value != "" {
+				strategy := decision.PositionAdjustment.StopLossAdjustment.Value
+				stopLossAdjustmentStrategy = &strategy
 			}
 			if decision.PositionAdjustment.Reasoning != "" {
 				reason := decision.PositionAdjustment.Reasoning
@@ -1510,17 +1519,17 @@ func convertTradingPairsToLegacyFormat(tradingPairs map[string]*SymbolDecision, 
 		// Create TradeDecision
 		// 创建 TradeDecision
 		tradeDecision := TradeDecision{
-			Symbol:          symbol,
-			Action:          action,
-			Confidence:      confidence,
-			Leverage:        leverage,
-			PositionSize:    positionSize,
-			StopLoss:        stopLoss,
-			Reasoning:       reasoning,
-			RiskRewardRatio: riskRewardRatio,
-			Summary:         summary,
-			NewStopLoss:     newStopLoss,
-			StopLossReason:  stopLossReason,
+			Symbol:                     symbol,
+			Action:                     action,
+			Confidence:                 confidence,
+			Leverage:                   leverage,
+			PositionSize:               positionSize,
+			StopLoss:                   stopLoss,
+			Reasoning:                  reasoning,
+			RiskRewardRatio:            riskRewardRatio,
+			Summary:                    summary,
+			StopLossAdjustmentStrategy: stopLossAdjustmentStrategy,
+			StopLossReason:             stopLossReason,
 		}
 
 		result[symbol] = tradeDecision

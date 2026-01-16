@@ -42,10 +42,8 @@ type SymbolMarketData struct {
 // CurrentPositionData represents current position information
 // CurrentPositionData 表示当前持仓信息
 type CurrentPositionData struct {
-	Side       string  `json:"side"`        // Position side: "LONG", "SHORT", or "" (no position) / 持仓方向
-	EntryPrice float64 `json:"entry_price"` // Entry price / 开仓价格
-	Size       float64 `json:"size"`        // Position size / 持仓数量
-	Leverage   int     `json:"leverage"`    // Leverage multiplier / 杠杆倍数
+	Side     string  `json:"side"`      // Position side: "LONG", "SHORT", or "" (no position) / 持仓方向
+	StopLoss float64 `json:"stop_loss"` // Current stop loss price / 当前止损价格
 }
 
 // IndicatorsData represents technical indicators

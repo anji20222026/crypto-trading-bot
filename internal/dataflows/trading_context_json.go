@@ -201,8 +201,9 @@ func GetTradingOutputSchema() *TradingOutputSchema {
 								Description: "Position adjustment action (only for existing positions)",
 							},
 							"stop_loss_adjustment": {
-								Type:        "number",
-								Description: "New stop loss price (null if no adjustment)",
+								Type:        "string",
+								Enum:        []string{"ALLOW", "HOLD", "DISALLOW"},
+								Description: "Stop loss adjustment strategy: ALLOW=calculate new stop based on structure, HOLD=keep current stop, DISALLOW=prohibit adjustment",
 							},
 							"take_profit_adjustment": {
 								Type:        "number",

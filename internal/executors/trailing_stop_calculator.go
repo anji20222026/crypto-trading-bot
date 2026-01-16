@@ -293,6 +293,190 @@ func (calc *TrailingStopCalculator) CalculateTrailingStop(
 	return stopPrice
 }
 
+// CalculateStructureBasedStopWithBoundary calculates stop-loss based on market structure
+// CalculateStructureBasedStopWithBoundary 基于市场结构计算止损
+//
+// This implements the simplified structure-based stop-loss calculation.
+// 这实现了简化的基于结构的止损计算。
+//
+// Parameters:
+// 参数：
+//   - symbol: Trading symbol
+//   - side: "long" or "short"
+//   - structureLevel: Support level (for long) or resistance level (for short)
+//   - ema20: EMA20 value (not used in current formula, kept for future)
+//   - atr: Current ATR value
+//   - bufferMultiplier: ATR buffer multiplier (0.2-0.5 for initial, 0-0.3 for trailing)
+//   - isInitial: true for first trade, false for position adjustment
+//
+// Returns:
+// 返回：
+//   - Stop-loss price based on structure
+//   - 基于结构的止损价格
+//
+// Formula (简化公式):
+// 公式：
+//
+//	① Initial stop (第一次交易):
+//	   Long:  stop_loss = support_level - ATR × (0.2~0.5)
+//	   Short: stop_loss = resistance_level + ATR × (0.2~0.5)
+//
+//	② Trailing stop (已有仓位):
+//	   Long:  candidate_sl = new_support + ATR × (0~0.3)
+//	          stop_loss = max(current_stop_loss, candidate_sl)  [只收紧]
+//	   Short: candidate_sl = new_resistance - ATR × (0~0.3)
+//	          stop_loss = min(current_stop_loss, candidate_sl)  [只收紧]
+//
+// Note: The "only tighten" logic is handled by the caller (StopLossManager)
+// 注意："只收紧"逻辑由调用方（StopLossManager）处理
+func (calc *TrailingStopCalculator) CalculateStructureBasedStopWithBoundary(
+	symbol string,
+	side string,
+	structureLevel float64,
+	ema20 float64,
+	atr float64,
+	bufferMultiplier float64,
+	isInitial bool,
+) float64 {
+	if structureLevel == 0.0 {
+		if calc.logger != nil {
+			calc.logger.Warning(fmt.Sprintf("【%s】未提供市场结构水平，无法计算基于结构的止损", symbol))
+		}
+		return 0.0
+	}
+
+	if atr <= 0 {
+		if calc.logger != nil {
+			calc.logger.Warning(fmt.Sprintf("【%s】ATR 值无效 (%.4f)，无法计算止损", symbol, atr))
+		}
+		return 0.0
+	}
+
+	// Calculate ATR buffer
+	// 计算 ATR 缓冲
+	buffer := atr * bufferMultiplier
+
+	var stopPrice float64
+	var formula string
+
+	if side == "LONG" {
+		if isInitial {
+			// ① Initial long: stop = support - ATR × (0.2~0.5)
+			// ① 初始多单：止损 = 支撑位 - ATR × (0.2~0.5)
+			stopPrice = structureLevel - buffer
+			formula = fmt.Sprintf("支撑位 - ATR×%.2f = %.2f - %.2f = %.2f", bufferMultiplier, structureLevel, buffer, stopPrice)
+		} else {
+			// ② Trailing long: candidate = new_support + ATR × (0~0.3)
+			// ② 追踪多单：候选止损 = 新支撑位 + ATR × (0~0.3)
+			// Note: Caller will apply max(current, candidate) to ensure "only tighten"
+			// 注意：调用方会应用 max(当前, 候选) 确保"只收紧"
+			stopPrice = structureLevel + buffer
+			formula = fmt.Sprintf("新支撑位 + ATR×%.2f = %.2f + %.2f = %.2f", bufferMultiplier, structureLevel, buffer, stopPrice)
+		}
+	} else {
+		if isInitial {
+			// ① Initial short: stop = resistance + ATR × (0.2~0.5)
+			// ① 初始空单：止损 = 阻力位 + ATR × (0.2~0.5)
+			stopPrice = structureLevel + buffer
+			formula = fmt.Sprintf("阻力位 + ATR×%.2f = %.2f + %.2f = %.2f", bufferMultiplier, structureLevel, buffer, stopPrice)
+		} else {
+			// ② Trailing short: candidate = new_resistance - ATR × (0~0.3)
+			// ② 追踪空单：候选止损 = 新阻力位 - ATR × (0~0.3)
+			// Note: Caller will apply min(current, candidate) to ensure "only tighten"
+			// 注意：调用方会应用 min(当前, 候选) 确保"只收紧"
+			stopPrice = structureLevel - buffer
+			formula = fmt.Sprintf("新阻力位 - ATR×%.2f = %.2f - %.2f = %.2f", bufferMultiplier, structureLevel, buffer, stopPrice)
+		}
+	}
+
+	if calc.logger != nil {
+		stopType := "初始"
+		if !isInitial {
+			stopType = "追踪"
+		}
+		calc.logger.Info(fmt.Sprintf("【%s】计算%s止损（基于结构）: %s", symbol, stopType, formula))
+	}
+
+	return stopPrice
+}
+
+// CalculateStructureBasedStop calculates stop-loss based on market structure (support/resistance ± ATR × α)
+// CalculateStructureBasedStop 基于市场结构（支撑/阻力 ± ATR × α）计算止损
+//
+// This is a simplified version that uses average support/resistance levels.
+// 这是使用平均支撑/阻力位的简化版本。
+//
+// Parameters:
+// 参数：
+//   - symbol: Trading symbol
+//   - side: "long" or "short"
+//   - structureLevel: Average support level (for long) or resistance level (for short)
+//   - atr: Current ATR value
+//   - bufferMultiplier: ATR buffer multiplier α (0.2-0.3 for short-term trends)
+//   - isInitial: true for first trade, false for position adjustment (not used in formula)
+//
+// Returns:
+// 返回：
+//   - Stop-loss price based on structure
+//   - 基于结构的止损价格
+//
+// Formula (统一公式):
+// 公式：
+//   - Long:  stop_loss = support_level - ATR × α  (α = 0.2~0.3)
+//   - Short: stop_loss = resistance_level + ATR × α  (α = 0.2~0.3)
+//
+// Note: Same formula for both initial and trailing stops
+// 注意：初始止损和追踪止损使用相同公式
+func (calc *TrailingStopCalculator) CalculateStructureBasedStop(
+	symbol string,
+	side string,
+	structureLevel float64,
+	atr float64,
+	bufferMultiplier float64,
+	isInitial bool,
+) float64 {
+	if structureLevel == 0.0 {
+		// Fallback to traditional method if no structure level provided
+		// 如果没有提供结构水平，回退到传统方法
+		if calc.logger != nil {
+			calc.logger.Warning(fmt.Sprintf("【%s】未提供市场结构水平，无法计算基于结构的止损", symbol))
+		}
+		return 0.0
+	}
+
+	// Calculate buffer distance
+	// 计算缓冲距离
+	buffer := atr * bufferMultiplier
+
+	var stopPrice float64
+	if side == "long" {
+		// Long: stop = support - ATR × α
+		// 多仓：止损 = 支撑位 - ATR × α
+		stopPrice = structureLevel - buffer
+	} else {
+		// Short: stop = resistance + ATR × α
+		// 空仓：止损 = 阻力位 + ATR × α
+		stopPrice = structureLevel + buffer
+	}
+
+	if calc.logger != nil {
+		levelType := "支撑位"
+		operator := "-"
+		if side == "short" {
+			levelType = "阻力位"
+			operator = "+"
+		}
+		stopType := "初始"
+		if !isInitial {
+			stopType = "追踪"
+		}
+		calc.logger.Info(fmt.Sprintf("【%s】计算%s止损（基于结构）: %s=%.2f %s ATR×α=%.2f×%.2f → 止损价=%.2f",
+			symbol, stopType, levelType, structureLevel, operator, atr, bufferMultiplier, stopPrice))
+	}
+
+	return stopPrice
+}
+
 // IsValidUpdate checks if stop-loss update moves in favorable direction
 // IsValidUpdate 检查止损更新是否朝有利方向移动
 //
