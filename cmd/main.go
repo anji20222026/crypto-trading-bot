@@ -15,6 +15,7 @@ import (
 	"github.com/oak/crypto-trading-bot/internal/agents"
 	"github.com/oak/crypto-trading-bot/internal/config"
 	"github.com/oak/crypto-trading-bot/internal/constant"
+	"github.com/oak/crypto-trading-bot/internal/dataflows"
 	"github.com/oak/crypto-trading-bot/internal/executors"
 	"github.com/oak/crypto-trading-bot/internal/logger"
 	"github.com/oak/crypto-trading-bot/internal/portfolio"
@@ -104,7 +105,7 @@ func main() {
 
 	// Test LLM service with a simple call
 	// 使用简单调用测试 LLM 服务
-	log.Info(fmt.Sprintf("🔍 测试 LLM 服务连接..."))
+	log.Info("🔍 测试 LLM 服务连接...")
 	log.Info(fmt.Sprintf("   模型: %s", cfg.QuickThinkLLM))
 	log.Info(fmt.Sprintf("   API: %s", cfg.BackendURL))
 
@@ -327,9 +328,13 @@ func main() {
 
 		log.Info(portfolioMgr.GetPortfolioSummary())
 
+		// Initialize market data for ATR calculation
+		// 初始化市场数据模块用于 ATR 计算
+		marketData := dataflows.NewMarketData(cfg)
+
 		// Initialize trade coordinator with stop-loss manager
 		// 初始化交易协调器（传入止损管理器）
-		coordinator := executors.NewTradeCoordinator(cfg, executor, log, stopLossManager)
+		coordinator := executors.NewTradeCoordinator(cfg, executor, log, stopLossManager, db, marketData)
 
 		// Initialize fund manager
 		// 初始化资金管理器

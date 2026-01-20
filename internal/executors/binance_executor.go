@@ -1294,8 +1294,8 @@ func getSymbolPrecision(symbol string) (precision int, minQty float64) {
 		precision = 3 // 0.001 ETH
 		minQty = 0.001
 	case "SOLUSDT", "SOL/USDT":
-		precision = 2 // 0.01 SOL (2025-04-02 更新)
-		minQty = 0.01
+		precision = 0 // 1 SOL (2026-01-16 更新：币安期货要求整数)
+		minQty = 1.0
 	case "BNBUSDT", "BNB/USDT":
 		precision = 2 // 0.01 BNB
 		minQty = 0.01

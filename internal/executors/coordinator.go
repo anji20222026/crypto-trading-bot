@@ -3,10 +3,13 @@ package executors
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/oak/crypto-trading-bot/internal/config"
+	"github.com/oak/crypto-trading-bot/internal/dataflows"
 	"github.com/oak/crypto-trading-bot/internal/logger"
+	"github.com/oak/crypto-trading-bot/internal/storage"
 )
 
 // TradeCoordinator coordinates the entire trading flow from decision to execution
@@ -16,16 +19,20 @@ type TradeCoordinator struct {
 	executor        *BinanceExecutor
 	logger          *logger.ColorLogger
 	stopLossManager *StopLossManager
+	storage         *storage.Storage
+	marketData      *dataflows.MarketData
 }
 
 // NewTradeCoordinator creates a new TradeCoordinator
 // NewTradeCoordinator 创建新的交易协调器
-func NewTradeCoordinator(cfg *config.Config, executor *BinanceExecutor, log *logger.ColorLogger, stopLossManager *StopLossManager) *TradeCoordinator {
+func NewTradeCoordinator(cfg *config.Config, executor *BinanceExecutor, log *logger.ColorLogger, stopLossManager *StopLossManager, db *storage.Storage, marketData *dataflows.MarketData) *TradeCoordinator {
 	return &TradeCoordinator{
 		config:          cfg,
 		executor:        executor,
 		logger:          log,
 		stopLossManager: stopLossManager,
+		storage:         db,
+		marketData:      marketData,
 	}
 }
 
@@ -346,20 +353,193 @@ func (tc *TradeCoordinator) postExecutionVerification(ctx context.Context, symbo
 		}
 		tc.logger.Info(fmt.Sprintf("  ✓ 多仓已建立: %.4f @ $%.2f", newPosition.Size, newPosition.EntryPrice))
 
+		// Place stop-loss for new long position
+		// 为新多仓下止损单
+		if err := tc.placeStopLossForPosition(ctx, symbol, "long", result); err != nil {
+			tc.logger.Warning(fmt.Sprintf("⚠️  下止损单失败: %v", err))
+			// Don't return error - position is already opened
+			// 不返回错误 - 持仓已经开启
+		}
+
 	case ActionSell:
 		if newPosition == nil || newPosition.Side != "short" {
 			return fmt.Errorf("开空后应有空仓，但当前持仓状态不符")
 		}
 		tc.logger.Info(fmt.Sprintf("  ✓ 空仓已建立: %.4f @ $%.2f", newPosition.Size, newPosition.EntryPrice))
 
+		// Place stop-loss for new short position
+		// 为新空仓下止损单
+		if err := tc.placeStopLossForPosition(ctx, symbol, "short", result); err != nil {
+			tc.logger.Warning(fmt.Sprintf("⚠️  下止损单失败: %v", err))
+			// Don't return error - position is already opened
+			// 不返回错误 - 持仓已经开启
+		}
+
 	case ActionCloseLong, ActionCloseShort:
 		if newPosition != nil && newPosition.Size > 0.0001 {
 			return fmt.Errorf("平仓后应无持仓，但当前仍有持仓: %.4f", newPosition.Size)
 		}
 		tc.logger.Info("  ✓ 持仓已平仓")
+
+		// Close position in stop-loss manager
+		// 在止损管理器中关闭持仓
+		closePrice := result.Price
+		realizedPnL := 0.0
+		if newPosition != nil {
+			realizedPnL = newPosition.UnrealizedPnL
+		}
+		closeReason := fmt.Sprintf("手动平仓: %s", result.Reason)
+		if err := tc.stopLossManager.ClosePosition(ctx, symbol, closePrice, closeReason, realizedPnL); err != nil {
+			tc.logger.Warning(fmt.Sprintf("⚠️  关闭止损管理器中的持仓失败: %v", err))
+		}
 	}
 
 	return nil
+}
+
+// placeStopLossForPosition places stop-loss order for a newly opened position
+// placeStopLossForPosition 为新开仓位下止损单
+func (tc *TradeCoordinator) placeStopLossForPosition(ctx context.Context, symbol string, side string, result *TradeResult) error {
+	if !tc.config.EnableStopLoss {
+		tc.logger.Info("⚠️  止损功能未启用，跳过止损单下达")
+		return nil
+	}
+
+	if tc.stopLossManager == nil {
+		return fmt.Errorf("止损管理器未初始化")
+	}
+
+	tc.logger.Info(fmt.Sprintf("\n[止损管理] 为 %s %s 仓位下止损单...", symbol, side))
+
+	// Step 1: Get ATR value for stop-loss calculation
+	// 步骤 1: 获取 ATR 值用于止损计算
+	atrValue, err := tc.getATRForStopLoss(ctx, symbol)
+	if err != nil {
+		return fmt.Errorf("获取 ATR 失败: %w", err)
+	}
+
+	atrPercent := (atrValue / result.Price) * 100
+	tc.logger.Info(fmt.Sprintf("  ✓ ATR(7): %.2f (%.2f%% of price)", atrValue, atrPercent))
+
+	// Step 2: Calculate initial stop-loss price
+	// 步骤 2: 计算初始止损价格
+	calculator := tc.stopLossManager.calculator
+	initialStopLoss := calculator.CalculateInitialStop(symbol, result.Price, atrValue, side)
+
+	stopDistance := math.Abs(result.Price - initialStopLoss)
+	stopDistancePercent := (stopDistance / result.Price) * 100
+	tc.logger.Info(fmt.Sprintf("  ✓ 初始止损价: %.2f (距离: %.2f, %.2f%%)", initialStopLoss, stopDistance, stopDistancePercent))
+
+	// Step 3: Create position object
+	// 步骤 3: 创建持仓对象
+	position := &Position{
+		ID:              fmt.Sprintf("%s-%d", symbol, time.Now().Unix()),
+		Symbol:          symbol,
+		Side:            side,
+		EntryPrice:      result.Price,
+		EntryTime:       time.Now(),
+		Quantity:        result.Amount,
+		Leverage:        tc.config.BinanceLeverage, // Use config default leverage
+		InitialStopLoss: initialStopLoss,
+		CurrentStopLoss: initialStopLoss,
+		StopLossType:    "fixed",
+		OpenReason:      result.Reason,
+		ATR:             atrValue,
+	}
+
+	// Step 4: Register position to stop-loss manager
+	// 步骤 4: 注册持仓到止损管理器
+	tc.stopLossManager.RegisterPosition(position)
+	tc.logger.Success(fmt.Sprintf("  ✓ 持仓已注册到止损管理器 (ID: %s)", position.ID))
+
+	// Step 5: Save position to database
+	// 步骤 5: 保存持仓到数据库
+	if tc.storage != nil {
+		posRecord := &storage.PositionRecord{
+			ID:              position.ID,
+			Symbol:          position.Symbol,
+			Side:            position.Side,
+			EntryPrice:      position.EntryPrice,
+			EntryTime:       position.EntryTime,
+			Quantity:        position.Quantity,
+			Leverage:        position.Leverage,
+			InitialStopLoss: position.InitialStopLoss,
+			CurrentStopLoss: position.CurrentStopLoss,
+			StopLossType:    position.StopLossType,
+			HighestPrice:    position.EntryPrice,
+			CurrentPrice:    position.EntryPrice,
+			OpenReason:      position.OpenReason,
+			ATR:             position.ATR,
+			StopLossOrderID: position.StopLossOrderID,
+			Closed:          false,
+		}
+
+		if err := tc.storage.SavePosition(posRecord); err != nil {
+			tc.logger.Warning(fmt.Sprintf("⚠️  保存持仓到数据库失败: %v", err))
+		} else {
+			tc.logger.Success(fmt.Sprintf("  ✓ 持仓已保存到数据库 (ID: %s)", position.ID))
+		}
+	}
+
+	// Step 6: Place initial stop-loss order on Binance
+	// 步骤 6: 在币安下初始止损单
+	if err := tc.stopLossManager.PlaceInitialStopLoss(ctx, position); err != nil {
+		tc.logger.Error(fmt.Sprintf("❌ 下初始止损单失败: %v", err))
+		return fmt.Errorf("下初始止损单失败: %w", err)
+	}
+
+	tc.logger.Success(fmt.Sprintf("✅ 止损单已成功下达: %.2f", initialStopLoss))
+	return nil
+}
+
+// getATRForStopLoss gets ATR value for stop-loss calculation
+// getATRForStopLoss 获取用于止损计算的 ATR 值
+func (tc *TradeCoordinator) getATRForStopLoss(ctx context.Context, symbol string) (float64, error) {
+	if tc.marketData == nil {
+		return 0, fmt.Errorf("市场数据模块未初始化")
+	}
+
+	// Get longer timeframe for ATR calculation (e.g., 4h)
+	// 使用更长的时间周期计算 ATR（例如 4h）
+	longerTimeframe := "4h"
+	lookbackDays := 5 // 5 days is enough for 20 4h candles
+
+	tc.logger.Info(fmt.Sprintf("  获取 %s %s K线数据用于 ATR 计算...", symbol, longerTimeframe))
+
+	ohlcvData, err := tc.marketData.GetOHLCV(ctx, symbol, longerTimeframe, lookbackDays)
+	if err != nil {
+		return 0, fmt.Errorf("获取 %s K线失败: %w", longerTimeframe, err)
+	}
+
+	if len(ohlcvData) < 14 {
+		return 0, fmt.Errorf("K线数据不足（需要至少14根，实际: %d）", len(ohlcvData))
+	}
+
+	// Calculate ATR with configured period
+	// 使用配置的周期计算 ATR
+	atrPeriod := tc.config.TrailingStopATRPeriod
+	if atrPeriod == 0 {
+		atrPeriod = 7 // Default to 7
+	}
+
+	indicators := dataflows.CalculateIndicators(ohlcvData, atrPeriod)
+
+	// Extract latest ATR value
+	// 提取最新 ATR 值
+	lastIdx := len(ohlcvData) - 1
+	var atr float64
+
+	if len(indicators.ATR_7) > lastIdx && !math.IsNaN(indicators.ATR_7[lastIdx]) {
+		atr = indicators.ATR_7[lastIdx]
+	} else {
+		return 0, fmt.Errorf("ATR(7)计算失败或为NaN")
+	}
+
+	if atr <= 0 {
+		return 0, fmt.Errorf("ATR(7)值无效: %.4f", atr)
+	}
+
+	return atr, nil
 }
 
 // GetExecutionSummary returns a summary of the execution

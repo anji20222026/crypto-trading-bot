@@ -17,6 +17,7 @@ import (
 	"github.com/oak/crypto-trading-bot/internal/agents"
 	"github.com/oak/crypto-trading-bot/internal/config"
 	"github.com/oak/crypto-trading-bot/internal/constant"
+	"github.com/oak/crypto-trading-bot/internal/dataflows"
 	"github.com/oak/crypto-trading-bot/internal/executors"
 	"github.com/oak/crypto-trading-bot/internal/logger"
 	"github.com/oak/crypto-trading-bot/internal/managers"
@@ -599,9 +600,13 @@ func runTradingAnalysis(ctx context.Context, cfg *config.Config, log *logger.Col
 
 		log.Info(portfolioMgr.GetPortfolioSummary())
 
+		// Initialize market data for ATR calculation
+		// 初始化市场数据模块用于 ATR 计算
+		marketData := dataflows.NewMarketData(cfg)
+
 		// Initialize trade coordinator with stop-loss manager
 		// 初始化交易协调器（传入止损管理器）
-		coordinator := executors.NewTradeCoordinator(cfg, executor, log, globalStopLossManager)
+		coordinator := executors.NewTradeCoordinator(cfg, executor, log, globalStopLossManager, db, marketData)
 
 		// Initialize fund manager
 		// 初始化资金管理器

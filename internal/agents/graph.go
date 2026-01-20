@@ -38,19 +38,19 @@ type SymbolReports struct {
 // TradeDecision represents a structured trading decision from LLM (for JSON Schema output)
 // TradeDecision 表示 LLM 的结构化交易决策（用于 JSON Schema 输出）
 type TradeDecision struct {
-	Symbol                      string   `json:"symbol"`                                  // 交易对 / Trading pair
-	Action                      string   `json:"action"`                                  // 交易动作 / Action: BUY|SELL|HOLD|CLOSE_LONG|CLOSE_SHORT
-	Confidence                  float64  `json:"confidence"`                              // 置信度 / Confidence (0.00-1.00)
-	Leverage                    int      `json:"leverage"`                                // 杠杆倍数 / Leverage multiplier
-	PositionSize                float64  `json:"position_size"`                           // 建议仓位百分比 / Position size percentage (0-100)
-	StopLoss                    float64  `json:"stop_loss"`                               // 止损价格 / Stop loss price
-	Reasoning                   string   `json:"reasoning"`                               // 交易理由 / Trading reasoning
-	RiskRewardRatio             float64  `json:"risk_reward_ratio"`                       // 预期盈亏比 / Risk/reward ratio
-	Summary                     string   `json:"summary"`                                 // 总结 / Summary
-	CurrentPnlPercent           *float64 `json:"current_pnl_percent,omitempty"`           // 当前盈亏% (仅HOLD) / Current PnL% (HOLD only)
-	NewStopLoss                 *float64 `json:"new_stop_loss,omitempty"`                 // 新止损价格 (仅HOLD调整时) / New stop loss (HOLD adjustment only)
-	StopLossReason              *string  `json:"stop_loss_reason,omitempty"`              // 止损调整理由 (仅HOLD调整时) / Stop loss reason (HOLD adjustment only)
-	StopLossAdjustmentStrategy  *string  `json:"stop_loss_adjustment_strategy,omitempty"` // 止损调整策略 (ALLOW/HOLD/DISALLOW) / Stop loss adjustment strategy
+	Symbol                     string   `json:"symbol"`                                  // 交易对 / Trading pair
+	Action                     string   `json:"action"`                                  // 交易动作 / Action: BUY|SELL|HOLD|CLOSE_LONG|CLOSE_SHORT
+	Confidence                 float64  `json:"confidence"`                              // 置信度 / Confidence (0.00-1.00)
+	Leverage                   int      `json:"leverage"`                                // 杠杆倍数 / Leverage multiplier
+	PositionSize               float64  `json:"position_size"`                           // 建议仓位百分比 / Position size percentage (0-100)
+	StopLoss                   float64  `json:"stop_loss"`                               // 止损价格 / Stop loss price
+	Reasoning                  string   `json:"reasoning"`                               // 交易理由 / Trading reasoning
+	RiskRewardRatio            float64  `json:"risk_reward_ratio"`                       // 预期盈亏比 / Risk/reward ratio
+	Summary                    string   `json:"summary"`                                 // 总结 / Summary
+	CurrentPnlPercent          *float64 `json:"current_pnl_percent,omitempty"`           // 当前盈亏% (仅HOLD) / Current PnL% (HOLD only)
+	NewStopLoss                *float64 `json:"new_stop_loss,omitempty"`                 // 新止损价格 (仅HOLD调整时) / New stop loss (HOLD adjustment only)
+	StopLossReason             *string  `json:"stop_loss_reason,omitempty"`              // 止损调整理由 (仅HOLD调整时) / Stop loss reason (HOLD adjustment only)
+	StopLossAdjustmentStrategy *string  `json:"stop_loss_adjustment_strategy,omitempty"` // 止损调整策略 (ALLOW/HOLD/DISALLOW) / Stop loss adjustment strategy
 }
 
 // TradingPairsResponse represents the new response format with trading_pairs structure
@@ -161,6 +161,32 @@ type ATRValue struct {
 // ReasonCode 表示决策门的原因代码
 type ReasonCode struct {
 	Value []string `json:"value"` // 原因代码列表 / Reason code list
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for ReasonCode
+// UnmarshalJSON 实现 ReasonCode 的自定义 JSON 解析
+func (rc *ReasonCode) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as {"value": [...]} format first
+	// 首先尝试解析为 {"value": [...]} 格式
+	type Alias ReasonCode
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(rc),
+	}
+	if err := sonic.Unmarshal(data, &aux); err == nil && rc.Value != nil {
+		return nil
+	}
+
+	// Fallback: try to unmarshal as direct array [...] format
+	// 回退：尝试解析为直接数组 [...] 格式
+	var directArray []string
+	if err := sonic.Unmarshal(data, &directArray); err == nil {
+		rc.Value = directArray
+		return nil
+	}
+
+	return fmt.Errorf("无法解析 reason_code: %s", string(data))
 }
 
 // AgentState holds the state of all analysts' reports for multiple symbols
@@ -957,7 +983,9 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	// 仅支持 JSON Object 模式（不支持 JSON Schema）的后端 URL 列表
 	jsonObjectModeBackends := []string{
 		"https://api.deepseek.com",                          // DeepSeek API
+		"https://openrouter.ai/api/v1",                      // openrouter API
 		"https://dashscope.aliyuncs.com/compatible-mode/v1", // Alibaba Cloud Qwen API
+
 	}
 
 	// Check if backend URL requires JSON Object mode
@@ -1107,7 +1135,7 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 %s
 
 ================================================================================
-`, time.Now().Format("2006-01-02 15:04:05"), g.config.QuickThinkLLM, modeStr, g.config.BackendURL, systemPrompt, userPrompt)
+`, time.Now().Format("2006-01-02_15-04-05"), g.config.QuickThinkLLM, modeStr, g.config.BackendURL, systemPrompt, userPrompt)
 
 	// Use a counter to track request number (simple increment)
 	// 使用计数器跟踪请求编号（简单递增）
@@ -1159,7 +1187,7 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 %s
 
 ================================================================================
-`, time.Now().Format("2006-01-02 15:04:05"), tokenInfo, len(response.Content), response.Content)
+`, time.Now().Format("2006-01-02_15-04-05"), tokenInfo, len(response.Content), response.Content)
 
 	g.logger.SaveLLMResponse(responseLog, requestNum)
 
@@ -1171,6 +1199,50 @@ func (g *SimpleTradingGraph) makeLLMDecision(ctx context.Context) (string, error
 	trimmed := strings.TrimSpace(cleanContent)
 
 	g.logger.Info(fmt.Sprintf("清理后的 JSON 长度: %d 字符", len(trimmed)))
+
+	// Try to parse as direct map[string]*SymbolDecision format (without trading_pairs wrapper)
+	// 尝试解析为直接的 map[string]*SymbolDecision 格式（不带 trading_pairs 外层）
+	var directSymbolDecisions map[string]*SymbolDecision
+	if err := sonic.Unmarshal([]byte(trimmed), &directSymbolDecisions); err == nil && len(directSymbolDecisions) > 0 {
+		// Check if this is actually a SymbolDecision structure (has trend_analyzer, decision_gate, etc.)
+		// 检查是否确实是 SymbolDecision 结构（包含 trend_analyzer、decision_gate 等）
+		isSymbolDecisionFormat := false
+		for _, decision := range directSymbolDecisions {
+			if decision != nil && (decision.TrendAnalyzer != nil || decision.DecisionGate != nil || decision.TradingSignal != nil) {
+				isSymbolDecisionFormat = true
+				break
+			}
+		}
+
+		if isSymbolDecisionFormat {
+			g.logger.Success(fmt.Sprintf("✅ 成功解析为直接 SymbolDecision 格式（无 trading_pairs 外层），包含 %d 个交易对", len(directSymbolDecisions)))
+
+			// Convert to legacy format for backward compatibility
+			// 转换为旧格式以保持向后兼容
+			convertedJSON, err := convertTradingPairsToLegacyFormat(directSymbolDecisions, g.logger)
+			if err != nil {
+				g.logger.Warning(fmt.Sprintf("转换直接 SymbolDecision 格式失败: %v", err))
+				return g.makeSimpleDecision(), nil
+			}
+
+			// Log converted decisions
+			// 记录转换后的决策
+			for symbol, decision := range convertedJSON {
+				g.logger.Info(fmt.Sprintf("  - %s: Action=%s, Confidence=%.2f, Leverage=%d",
+					symbol, decision.Action, decision.Confidence, decision.Leverage))
+			}
+
+			// Convert back to JSON string for return
+			// 转换回 JSON 字符串以返回
+			convertedBytes, err := sonic.MarshalIndent(convertedJSON, "", "  ")
+			if err != nil {
+				g.logger.Warning(fmt.Sprintf("序列化转换后的决策失败: %v", err))
+				return g.makeSimpleDecision(), nil
+			}
+
+			return string(convertedBytes), nil
+		}
+	}
 
 	// Try to parse as TradingPairsResponse (new format with trading_pairs structure)
 	// 尝试解析为 TradingPairsResponse（新格式，包含 trading_pairs 结构）
